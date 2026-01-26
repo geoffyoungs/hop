@@ -4,6 +4,7 @@ hop
 
 # Build artifacts
 dist/
+build/
 
 # IDE
 .idea/

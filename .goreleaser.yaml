@@ -2,10 +2,15 @@ version: 2
 
 project_name: hop
 
+git:
+  ignore_tags:
+    - nightly
+
 before:
   hooks:
     - go mod tidy
     - go generate ./...
+    - go run ./cmd/gendocs
 
 builds:
   - main: ./cmd/hop
@@ -30,27 +35,36 @@ archives:
     files:
       - LICENSE*
       - README.md
+      - docs/man/*
 
 brews:
   - name: hop
     repository:
       owner: geoff
       name: homebrew-tap
+    # Set to auto to skip during local builds, enable in CI with GORELEASER_SKIP_UPLOAD=false
+    skip_upload: auto
     homepage: https://github.com/geoff/hop
     description: "CLI tool for connecting to named hosts via SSH, Docker, or Kubernetes"
     license: "MIT"
     install: |
       bin.install "hop"
+      man1.install Dir["docs/man/*.1"]
 
 nfpms:
   - package_name: hop
-    homepage: https://github.com/geoff/hop
-    maintainer: Geoff <geoff@example.com>
+    homepage: https://github.com/geoffyoungs/hop
+    maintainer: Geoff Youngs <git@intersect-uk.co.uk>
     description: "CLI tool for connecting to named hosts via SSH, Docker, or Kubernetes"
     license: MIT
     formats:
       - deb
       - rpm
+    contents:
+      - src: docs/man/hop.1
+        dst: /usr/share/man/man1/hop.1
+      - src: docs/man/hop-completion.1
+        dst: /usr/share/man/man1/hop-completion.1
 
 checksum:
   name_template: 'checksums.txt'
@@ -62,3 +76,7 @@ changelog:
       - '^docs:'
       - '^test:'
       - '^chore:'
+
+release:
+  # Set to auto to skip during local builds
+  skip_upload: auto

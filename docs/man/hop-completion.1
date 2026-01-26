@@ -1,0 +1,50 @@
+.nh
+.TH "HOP" "1" "Jan 2026" "Hop" "User Commands"
+
+.SH NAME
+hop-completion - Generate shell completion scripts
+
+
+.SH SYNOPSIS
+\fBhop completion [bash|zsh|fish|powershell]\fP
+
+
+.SH DESCRIPTION
+Generate shell completion scripts for hop.
+
+.PP
+To load completions:
+
+.PP
+Bash:
+  $ source <(hop completion bash)
+  # To load completions for each session, execute once:
+  # Linux:
+  $ hop completion bash > /etc/bash_completion.d/hop
+  # macOS:
+  $ hop completion bash > $(brew --prefix)/etc/bash_completion.d/hop
+
+.PP
+Zsh:
+  $ source <(hop completion zsh)
+  # To load completions for each session, execute once:
+  $ hop completion zsh > "${fpath[1]}/_hop"
+
+.PP
+Fish:
+  $ hop completion fish | source
+  # To load completions for each session, execute once:
+  $ hop completion fish > ~/.config/fish/completions/hop.fish
+
+.PP
+PowerShell:
+  PS> hop completion powershell | Out-String | Invoke-Expression
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for completion
+
+
+.SH SEE ALSO
+\fBhop(1)\fP

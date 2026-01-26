@@ -40,23 +40,21 @@ archives:
       - docs/man/*
       - completions/*
 
-homebrew_casks:
+brews:
   - name: hop
-    binaries:
-      - hop
-    manpages:
-      - docs/man/*.1
-    completions:
-      bash: completions/hop.bash
-      zsh: completions/hop.zsh
-      fish: completions/hop.fish
     repository:
       owner: geoffyoungs
       name: homebrew-tap
-    directory: Casks
-    skip_upload: auto
     homepage: https://github.com/geoffyoungs/hop
     description: "CLI tool for connecting to named hosts via SSH, Docker, or Kubernetes"
+    license: "MIT"
+    skip_upload: auto
+    install: |
+      bin.install "hop"
+      man1.install Dir["docs/man/*.1"]
+      bash_completion.install "completions/hop.bash" => "hop"
+      zsh_completion.install "completions/hop.zsh" => "_hop"
+      fish_completion.install "completions/hop.fish"
 
 nfpms:
   - package_name: hop

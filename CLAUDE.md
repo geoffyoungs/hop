@@ -44,3 +44,26 @@ internal/
 2. Implement the `Backend` interface
 3. Add `init()` function that calls `Register(&NewBackend{})`
 4. The backend will be automatically available
+
+## Releasing
+
+Releases MUST be done using goreleaser. This is the only supported way to release.
+
+```bash
+# 1. Ensure working tree is clean
+git status
+
+# 2. Create and push a version tag
+git tag -a v0.x.0 -m "v0.x.0 - Release description"
+git push origin v0.x.0
+
+# 3. Run goreleaser (uses gh auth token)
+GITHUB_TOKEN=$(gh auth token) goreleaser release --clean
+```
+
+This will:
+- Build binaries for darwin/linux (amd64/arm64)
+- Generate shell completions (bash/zsh/fish)
+- Create .tar.gz, .deb, and .rpm packages
+- Upload to GitHub releases
+- Update the Homebrew tap

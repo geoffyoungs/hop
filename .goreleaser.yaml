@@ -30,7 +30,8 @@ builds:
       - -X main.date={{.Date}}
 
 archives:
-  - format: tar.gz
+  - formats:
+      - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE*
@@ -40,11 +41,10 @@ archives:
 brews:
   - name: hop
     repository:
-      owner: geoff
+      owner: geoffyoungs
       name: homebrew-tap
-    # Set to auto to skip during local builds, enable in CI with GORELEASER_SKIP_UPLOAD=false
     skip_upload: auto
-    homepage: https://github.com/geoff/hop
+    homepage: https://github.com/geoffyoungs/hop
     description: "CLI tool for connecting to named hosts via SSH, Docker, or Kubernetes"
     license: "MIT"
     install: |

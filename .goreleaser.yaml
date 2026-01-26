@@ -1,0 +1,64 @@
+version: 2
+
+project_name: hop
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - main: ./cmd/hop
+    binary: hop
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE*
+      - README.md
+
+brews:
+  - name: hop
+    repository:
+      owner: geoff
+      name: homebrew-tap
+    homepage: https://github.com/geoff/hop
+    description: "CLI tool for connecting to named hosts via SSH, Docker, or Kubernetes"
+    license: "MIT"
+    install: |
+      bin.install "hop"
+
+nfpms:
+  - package_name: hop
+    homepage: https://github.com/geoff/hop
+    maintainer: Geoff <geoff@example.com>
+    description: "CLI tool for connecting to named hosts via SSH, Docker, or Kubernetes"
+    license: MIT
+    formats:
+      - deb
+      - rpm
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'

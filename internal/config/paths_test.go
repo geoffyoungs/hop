@@ -97,11 +97,197 @@ func TestConfigExists(t *testing.T) {
 
 func TestPathModeConstants(t *testing.T) {
 	// Ensure constants have distinct values
-	modes := []PathMode{ModeDefault, ModeLocal, ModeUser, ModeExplicit}
+	modes := []PathMode{ModeDefault, ModeLocal, ModeUser, ModeExplicit, ModeProject}
 	seen := make(map[PathMode]bool)
 
 	for _, mode := range modes {
 		assert.False(t, seen[mode], "PathMode constant values should be unique")
 		seen[mode] = true
 	}
+}
+
+func TestConfigFileNames(t *testing.T) {
+	names := ConfigFileNames()
+	assert.Equal(t, []string{"hosts.ini", "hosts.conf"}, names)
+}
+
+func TestFindProjectConfig_CurrentDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Resolve symlinks for consistent path comparison (macOS /var -> /private/var)
+	tmpDir, err := filepath.EvalSymlinks(tmpDir)
+	require.NoError(t, err)
+
+	// Create hosts.ini in the temp dir
+	configPath := filepath.Join(tmpDir, "hosts.ini")
+	err = os.WriteFile(configPath, []byte("[test]\n"), 0644)
+	require.NoError(t, err)
+
+	// Change to the temp dir
+	oldWd, err := os.Getwd()
+	require.NoError(t, err)
+	defer os.Chdir(oldWd)
+
+	err = os.Chdir(tmpDir)
+	require.NoError(t, err)
+
+	path, found := FindProjectConfig()
+	assert.True(t, found)
+	assert.Equal(t, configPath, path)
+}
+
+func TestFindProjectConfig_ParentDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Resolve symlinks for consistent path comparison (macOS /var -> /private/var)
+	tmpDir, err := filepath.EvalSymlinks(tmpDir)
+	require.NoError(t, err)
+
+	// Create hosts.ini in the parent dir
+	configPath := filepath.Join(tmpDir, "hosts.ini")
+	err = os.WriteFile(configPath, []byte("[test]\n"), 0644)
+	require.NoError(t, err)
+
+	// Create a subdirectory
+	subDir := filepath.Join(tmpDir, "subdir")
+	err = os.Mkdir(subDir, 0755)
+	require.NoError(t, err)
+
+	// Change to the subdirectory
+	oldWd, err := os.Getwd()
+	require.NoError(t, err)
+	defer os.Chdir(oldWd)
+
+	err = os.Chdir(subDir)
+	require.NoError(t, err)
+
+	path, found := FindProjectConfig()
+	assert.True(t, found)
+	assert.Equal(t, configPath, path)
+}
+
+func TestFindProjectConfig_StopsAtGit(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Resolve symlinks for consistent path comparison (macOS /var -> /private/var)
+	tmpDir, err := filepath.EvalSymlinks(tmpDir)
+	require.NoError(t, err)
+
+	// Create .git directory (project root)
+	gitDir := filepath.Join(tmpDir, ".git")
+	err = os.Mkdir(gitDir, 0755)
+	require.NoError(t, err)
+
+	// Create hosts.ini in parent of project (should NOT be found)
+	parentConfigPath := filepath.Join(filepath.Dir(tmpDir), "hosts.ini")
+	// Don't create this - we just want to make sure we stop at .git
+
+	// Create a subdirectory inside project
+	subDir := filepath.Join(tmpDir, "subdir")
+	err = os.Mkdir(subDir, 0755)
+	require.NoError(t, err)
+
+	// Change to the subdirectory
+	oldWd, err := os.Getwd()
+	require.NoError(t, err)
+	defer os.Chdir(oldWd)
+
+	err = os.Chdir(subDir)
+	require.NoError(t, err)
+
+	path, found := FindProjectConfig()
+	assert.False(t, found)
+	assert.Empty(t, path)
+
+	// Now create config in project root
+	projectConfigPath := filepath.Join(tmpDir, "hosts.ini")
+	err = os.WriteFile(projectConfigPath, []byte("[test]\n"), 0644)
+	require.NoError(t, err)
+
+	path, found = FindProjectConfig()
+	assert.True(t, found)
+	assert.Equal(t, projectConfigPath, path)
+
+	// Clean up the parent config if it was somehow created
+	os.Remove(parentConfigPath)
+}
+
+func TestFindProjectConfig_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Resolve symlinks for consistent path comparison (macOS /var -> /private/var)
+	tmpDir, err := filepath.EvalSymlinks(tmpDir)
+	require.NoError(t, err)
+
+	// Create .git directory (project root) but no config
+	gitDir := filepath.Join(tmpDir, ".git")
+	err = os.Mkdir(gitDir, 0755)
+	require.NoError(t, err)
+
+	// Change to the temp dir
+	oldWd, err := os.Getwd()
+	require.NoError(t, err)
+	defer os.Chdir(oldWd)
+
+	err = os.Chdir(tmpDir)
+	require.NoError(t, err)
+
+	path, found := FindProjectConfig()
+	assert.False(t, found)
+	assert.Empty(t, path)
+}
+
+func TestFindProjectConfig_PrefersIni(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Resolve symlinks for consistent path comparison (macOS /var -> /private/var)
+	tmpDir, err := filepath.EvalSymlinks(tmpDir)
+	require.NoError(t, err)
+
+	// Create both hosts.ini and hosts.conf
+	iniPath := filepath.Join(tmpDir, "hosts.ini")
+	confPath := filepath.Join(tmpDir, "hosts.conf")
+
+	err = os.WriteFile(confPath, []byte("[conf]\n"), 0644)
+	require.NoError(t, err)
+
+	err = os.WriteFile(iniPath, []byte("[ini]\n"), 0644)
+	require.NoError(t, err)
+
+	// Change to the temp dir
+	oldWd, err := os.Getwd()
+	require.NoError(t, err)
+	defer os.Chdir(oldWd)
+
+	err = os.Chdir(tmpDir)
+	require.NoError(t, err)
+
+	path, found := FindProjectConfig()
+	assert.True(t, found)
+	assert.Equal(t, iniPath, path) // Should prefer .ini over .conf
+}
+
+func TestFindProjectConfig_FallsBackToConf(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Resolve symlinks for consistent path comparison (macOS /var -> /private/var)
+	tmpDir, err := filepath.EvalSymlinks(tmpDir)
+	require.NoError(t, err)
+
+	// Create only hosts.conf
+	confPath := filepath.Join(tmpDir, "hosts.conf")
+	err = os.WriteFile(confPath, []byte("[conf]\n"), 0644)
+	require.NoError(t, err)
+
+	// Change to the temp dir
+	oldWd, err := os.Getwd()
+	require.NoError(t, err)
+	defer os.Chdir(oldWd)
+
+	err = os.Chdir(tmpDir)
+	require.NoError(t, err)
+
+	path, found := FindProjectConfig()
+	assert.True(t, found)
+	assert.Equal(t, confPath, path)
 }

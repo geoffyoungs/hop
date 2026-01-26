@@ -22,14 +22,15 @@ var (
 )
 
 var (
-	checkFlag   bool
-	listFlag    bool
-	copyFlag    bool
-	forwardFlag string
-	configPath  string
-	localFlag   bool
-	userFlag    bool
-	addFlag     bool
+	checkFlag    bool
+	listFlag     bool
+	copyFlag     bool
+	forwardFlag  string
+	configPath   string
+	localFlag    bool
+	userFlag     bool
+	addFlag      bool
+	terminalFlag bool
 )
 
 // RootCmd is the base command for hop
@@ -45,6 +46,8 @@ Backends:
 
 Examples:
   hop production                              # Connect to host
+  hop .production                             # Use project config only
+  hop ~production                             # Use user config only
   hop --list                                  # List all hosts
   hop --check                                 # Check backend availability
   hop --copy file.txt server:/path            # Upload file
@@ -52,11 +55,20 @@ Examples:
   hop --forward "server 8080:80"              # Port forward
   hop --add myhost host=10.0.0.1 user=admin   # Add new host
   hop --local --list                          # List hosts from ./hosts.ini
+  hop --terminal production                   # Sync terminfo then connect
 
 Configuration:
-  Default: ~/.config/hop/hosts.ini
-  Local:   ./hosts.ini (with --local flag)
-  Custom:  Use --config to specify a path`,
+  Search order: ./hosts.ini -> parent dirs (up to .git) -> ~/.config/hop/hosts.ini
+
+  Prefix syntax:
+    hop production      Search project config first, then user config
+    hop .production     Use project config only (walk up to .git)
+    hop ~production     Use user config only (~/.config/hop/hosts.ini)
+
+  Flags:
+    --local             Use ./hosts.ini only (no directory walking)
+    --user              Use ~/.config/hop/hosts.ini only
+    --config PATH       Use explicit config file path`,
 	Args:              cobra.ArbitraryArgs,
 	RunE:              runRoot,
 	ValidArgsFunction: completeHostNames,
@@ -71,6 +83,7 @@ func init() {
 	RootCmd.Flags().BoolVar(&localFlag, "local", false, "Use local config file (./hosts.ini)")
 	RootCmd.Flags().BoolVar(&userFlag, "user", false, "Use user config file (~/.config/hop/hosts.ini)")
 	RootCmd.Flags().BoolVar(&addFlag, "add", false, "Add a new host (usage: --add name key=value ...)")
+	RootCmd.Flags().BoolVar(&terminalFlag, "terminal", false, "Sync local terminfo to remote host before connecting")
 
 	// Mark mutually exclusive flags
 	RootCmd.MarkFlagsMutuallyExclusive("local", "user", "config")
@@ -142,12 +155,11 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		return runAdd(args)
 	}
 
-	cfg, err := loadConfig()
-	if err != nil {
-		return err
-	}
-
 	if listFlag {
+		cfg, err := loadConfig()
+		if err != nil {
+			return err
+		}
 		return runList(cfg)
 	}
 
@@ -156,14 +168,14 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	}
 
 	if copyFlag {
-		return runCopy(cfg, args)
+		return runCopy(args)
 	}
 
 	if forwardFlag != "" {
-		return runForward(cfg, forwardFlag)
+		return runForward(forwardFlag)
 	}
 
-	return runConnect(cfg, args[0])
+	return runConnect(args[0])
 }
 
 func getPathMode() config.PathMode {
@@ -183,9 +195,49 @@ func getConfigPath() string {
 	return config.ResolvePath(getPathMode(), configPath)
 }
 
+// parseAliasPrefix extracts a prefix from the alias and returns the clean alias and mode
+// ".alias" -> alias, ModeProject (project config only)
+// "~alias" -> alias, ModeUser (user config only)
+// "alias"  -> alias, ModeDefault (search both)
+func parseAliasPrefix(alias string) (string, config.PathMode) {
+	if strings.HasPrefix(alias, ".") {
+		return alias[1:], config.ModeProject
+	}
+	if strings.HasPrefix(alias, "~") {
+		return alias[1:], config.ModeUser
+	}
+	return alias, config.ModeDefault
+}
+
 func loadConfig() (*config.Config, error) {
 	path := getConfigPath()
 	return config.LoadFromPath(path)
+}
+
+// loadConfigForAlias loads config based on alias prefix, returning the config and cleaned alias
+func loadConfigForAlias(alias string) (*config.Config, string, error) {
+	cleanAlias, mode := parseAliasPrefix(alias)
+
+	// If flags are set, they override prefix
+	if configPath != "" || localFlag || userFlag {
+		cfg, err := loadConfig()
+		return cfg, cleanAlias, err
+	}
+
+	path := config.ResolvePath(mode, "")
+
+	// Handle errors for prefix modes that require specific configs
+	if mode == config.ModeProject && path == "" {
+		return nil, cleanAlias, fmt.Errorf("no project config found (walked up to .git or filesystem root)")
+	}
+	if mode == config.ModeUser {
+		if !config.ConfigExists(path) {
+			return nil, cleanAlias, fmt.Errorf("user config not found at %s", config.UserConfigPath())
+		}
+	}
+
+	cfg, err := config.LoadFromPath(path)
+	return cfg, cleanAlias, err
 }
 
 func runAdd(args []string) error {
@@ -260,10 +312,15 @@ func runList(cfg *config.Config) error {
 	return nil
 }
 
-func runConnect(cfg *config.Config, alias string) error {
-	hostCfg, ok := cfg.Get(alias)
+func runConnect(alias string) error {
+	cfg, cleanAlias, err := loadConfigForAlias(alias)
+	if err != nil {
+		return err
+	}
+
+	hostCfg, ok := cfg.Get(cleanAlias)
 	if !ok {
-		return fmt.Errorf("host %q not found in configuration", alias)
+		return fmt.Errorf("host %q not found in configuration", cleanAlias)
 	}
 
 	host := hostCfg.ToHost()
@@ -274,13 +331,21 @@ func runConnect(cfg *config.Config, alias string) error {
 	}
 
 	if err := b.Validate(host); err != nil {
-		return fmt.Errorf("invalid configuration for %q: %v", alias, err)
+		return fmt.Errorf("invalid configuration for %q: %v", cleanAlias, err)
 	}
 
-	return b.Connect(context.Background(), host)
+	ctx := context.Background()
+
+	if terminalFlag {
+		if err := backend.SyncTerminfo(ctx, b, host); err != nil {
+			return fmt.Errorf("failed to sync terminfo: %v", err)
+		}
+	}
+
+	return b.Connect(ctx, host)
 }
 
-func runCopy(cfg *config.Config, args []string) error {
+func runCopy(args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("copy requires source and destination arguments")
 	}
@@ -305,9 +370,14 @@ func runCopy(cfg *config.Config, args []string) error {
 		return fmt.Errorf("one argument must be in alias:path format")
 	}
 
-	hostCfg, ok := cfg.Get(alias)
+	cfg, cleanAlias, err := loadConfigForAlias(alias)
+	if err != nil {
+		return err
+	}
+
+	hostCfg, ok := cfg.Get(cleanAlias)
 	if !ok {
-		return fmt.Errorf("host %q not found in configuration", alias)
+		return fmt.Errorf("host %q not found in configuration", cleanAlias)
 	}
 
 	host := hostCfg.ToHost()
@@ -318,13 +388,13 @@ func runCopy(cfg *config.Config, args []string) error {
 	}
 
 	if err := b.Validate(host); err != nil {
-		return fmt.Errorf("invalid configuration for %q: %v", alias, err)
+		return fmt.Errorf("invalid configuration for %q: %v", cleanAlias, err)
 	}
 
 	return b.Copy(context.Background(), host, localPath, remotePath, direction)
 }
 
-func runForward(cfg *config.Config, forward string) error {
+func runForward(forward string) error {
 	parts := strings.Fields(forward)
 	if len(parts) != 2 {
 		return fmt.Errorf("forward requires alias and local:remote format")
@@ -346,9 +416,14 @@ func runForward(cfg *config.Config, forward string) error {
 		return fmt.Errorf("invalid remote port: %v", err)
 	}
 
-	hostCfg, ok := cfg.Get(alias)
+	cfg, cleanAlias, err := loadConfigForAlias(alias)
+	if err != nil {
+		return err
+	}
+
+	hostCfg, ok := cfg.Get(cleanAlias)
 	if !ok {
-		return fmt.Errorf("host %q not found in configuration", alias)
+		return fmt.Errorf("host %q not found in configuration", cleanAlias)
 	}
 
 	host := hostCfg.ToHost()
@@ -359,10 +434,10 @@ func runForward(cfg *config.Config, forward string) error {
 	}
 
 	if err := b.Validate(host); err != nil {
-		return fmt.Errorf("invalid configuration for %q: %v", alias, err)
+		return fmt.Errorf("invalid configuration for %q: %v", cleanAlias, err)
 	}
 
-	fmt.Printf("Forwarding localhost:%d -> %s:%d\n", localPort, alias, remotePort)
+	fmt.Printf("Forwarding localhost:%d -> %s:%d\n", localPort, cleanAlias, remotePort)
 	fmt.Println("Press Ctrl+C to stop")
 
 	return b.ForwardPort(context.Background(), host, localPort, remotePort)

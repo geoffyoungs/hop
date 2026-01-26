@@ -11,6 +11,7 @@ before:
     - go mod tidy
     - go generate ./...
     - go run ./cmd/gendocs
+    - ./scripts/completions.sh
 
 builds:
   - main: ./cmd/hop
@@ -37,19 +38,25 @@ archives:
       - LICENSE*
       - README.md
       - docs/man/*
+      - completions/*
 
-brews:
+homebrew_casks:
   - name: hop
+    binaries:
+      - hop
+    manpages:
+      - docs/man/*.1
+    completions:
+      bash: completions/hop.bash
+      zsh: completions/hop.zsh
+      fish: completions/hop.fish
     repository:
       owner: geoffyoungs
       name: homebrew-tap
+    directory: Casks
     skip_upload: auto
     homepage: https://github.com/geoffyoungs/hop
     description: "CLI tool for connecting to named hosts via SSH, Docker, or Kubernetes"
-    license: "MIT"
-    install: |
-      bin.install "hop"
-      man1.install Dir["docs/man/*.1"]
 
 nfpms:
   - package_name: hop
@@ -65,6 +72,12 @@ nfpms:
         dst: /usr/share/man/man1/hop.1
       - src: docs/man/hop-completion.1
         dst: /usr/share/man/man1/hop-completion.1
+      - src: completions/hop.bash
+        dst: /usr/share/bash-completion/completions/hop
+      - src: completions/hop.zsh
+        dst: /usr/share/zsh/vendor-completions/_hop
+      - src: completions/hop.fish
+        dst: /usr/share/fish/vendor_completions.d/hop.fish
 
 checksum:
   name_template: 'checksums.txt'

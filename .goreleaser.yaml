@@ -45,6 +45,7 @@ brews:
     repository:
       owner: geoffyoungs
       name: homebrew-tap
+    directory: Formula
     homepage: https://github.com/geoffyoungs/hop
     description: "CLI tool for connecting to named hosts via SSH, Docker, or Kubernetes"
     license: "MIT"

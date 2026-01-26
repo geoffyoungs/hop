@@ -21,6 +21,8 @@ Backends:
 .PP
 Examples:
   hop production                              # Connect to host
+  hop .production                             # Use project config only
+  hop ~production                             # Use user config only
   hop --list                                  # List all hosts
   hop --check                                 # Check backend availability
   hop --copy file.txt server:/path            # Upload file
@@ -28,12 +30,23 @@ Examples:
   hop --forward "server 8080:80"              # Port forward
   hop --add myhost host=10.0.0.1 user=admin   # Add new host
   hop --local --list                          # List hosts from ./hosts.ini
+  hop --terminal production                   # Sync terminfo then connect
 
 .PP
 Configuration:
-  Default: ~/.config/hop/hosts.ini
-  Local:   ./hosts.ini (with --local flag)
-  Custom:  Use --config to specify a path
+  Search order: ./hosts.ini -> parent dirs (up to .git) -> ~/.config/hop/hosts.ini
+
+.PP
+Prefix syntax:
+    hop production      Search project config first, then user config
+    hop .production     Use project config only (walk up to .git)
+    hop ~production     Use user config only (~/.config/hop/hosts.ini)
+
+.PP
+Flags:
+    --local             Use ./hosts.ini only (no directory walking)
+    --user              Use ~/.config/hop/hosts.ini only
+    --config PATH       Use explicit config file path
 
 
 .SH OPTIONS
@@ -67,6 +80,10 @@ Configuration:
 .PP
 \fB--local\fP[=false]
 	Use local config file (./hosts.ini)
+
+.PP
+\fB--terminal\fP[=false]
+	Sync local terminfo to remote host before connecting
 
 .PP
 \fB--user\fP[=false]

@@ -1,7 +1,7 @@
 # hop
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/geoff/hop.svg)](https://pkg.go.dev/github.com/geoff/hop)
-[![Go Report Card](https://goreportcard.com/badge/github.com/geoff/hop)](https://goreportcard.com/report/github.com/geoff/hop)
+[![Go Reference](https://pkg.go.dev/badge/github.com/geoffyoungs/hop.svg)](https://pkg.go.dev/github.com/geoffyoungs/hop)
+[![Go Report Card](https://goreportcard.com/badge/github.com/geoffyoungs/hop)](https://goreportcard.com/report/github.com/geoffyoungs/hop)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A CLI tool for connecting to named hosts using an INI configuration file. Supports SSH, Docker, and Kubernetes backends.
@@ -9,8 +9,8 @@ A CLI tool for connecting to named hosts using an INI configuration file. Suppor
 ## Quick Start
 
 ```bash
-# Install
-brew install geoff/tap/hop
+# Install (macOS/Linux)
+brew install geoffyoungs/tap/hop
 
 # Add a host
 hop --add production host=192.168.1.100 user=admin
@@ -24,18 +24,82 @@ hop production
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew install geoff/tap/hop
+# Add the tap and install
+brew install geoffyoungs/tap/hop
+
+# Or in one command
+brew install geoffyoungs/tap/hop
 ```
 
-### Go
+This works on:
+- macOS (Intel and Apple Silicon)
+- Linux (x86_64 and ARM64)
+
+### Debian/Ubuntu (apt)
+
+Download the `.deb` package from the [releases page](https://github.com/geoffyoungs/hop/releases) and install:
 
 ```bash
-go install github.com/geoff/hop/cmd/hop@latest
+# For x86_64/amd64
+curl -LO https://github.com/geoffyoungs/hop/releases/download/v0.1.0-beta/hop_0.1.0-beta_linux_amd64.deb
+sudo dpkg -i hop_0.1.0-beta_linux_amd64.deb
+
+# For ARM64
+curl -LO https://github.com/geoffyoungs/hop/releases/download/v0.1.0-beta/hop_0.1.0-beta_linux_arm64.deb
+sudo dpkg -i hop_0.1.0-beta_linux_arm64.deb
 ```
 
-### From Releases
+### Fedora/RHEL/CentOS (rpm)
 
-Download the appropriate binary from the [releases page](https://github.com/geoff/hop/releases).
+Download the `.rpm` package from the [releases page](https://github.com/geoffyoungs/hop/releases) and install:
+
+```bash
+# For x86_64/amd64
+curl -LO https://github.com/geoffyoungs/hop/releases/download/v0.1.0-beta/hop_0.1.0-beta_linux_amd64.rpm
+sudo rpm -i hop_0.1.0-beta_linux_amd64.rpm
+
+# For ARM64
+curl -LO https://github.com/geoffyoungs/hop/releases/download/v0.1.0-beta/hop_0.1.0-beta_linux_arm64.rpm
+sudo rpm -i hop_0.1.0-beta_linux_arm64.rpm
+```
+
+### Binary Download (All Platforms)
+
+Download the appropriate archive from the [releases page](https://github.com/geoffyoungs/hop/releases):
+
+| Platform | Architecture | Download |
+|----------|--------------|----------|
+| macOS | Intel (x86_64) | [hop_0.1.0-beta_darwin_amd64.tar.gz](https://github.com/geoffyoungs/hop/releases/download/v0.1.0-beta/hop_0.1.0-beta_darwin_amd64.tar.gz) |
+| macOS | Apple Silicon (ARM64) | [hop_0.1.0-beta_darwin_arm64.tar.gz](https://github.com/geoffyoungs/hop/releases/download/v0.1.0-beta/hop_0.1.0-beta_darwin_arm64.tar.gz) |
+| Linux | x86_64 | [hop_0.1.0-beta_linux_amd64.tar.gz](https://github.com/geoffyoungs/hop/releases/download/v0.1.0-beta/hop_0.1.0-beta_linux_amd64.tar.gz) |
+| Linux | ARM64 | [hop_0.1.0-beta_linux_arm64.tar.gz](https://github.com/geoffyoungs/hop/releases/download/v0.1.0-beta/hop_0.1.0-beta_linux_arm64.tar.gz) |
+
+Extract and install:
+
+```bash
+# Example for macOS ARM64
+tar -xzf hop_0.1.0-beta_darwin_arm64.tar.gz
+sudo mv hop /usr/local/bin/
+
+# Optional: install man pages
+sudo mkdir -p /usr/local/share/man/man1
+sudo mv docs/man/*.1 /usr/local/share/man/man1/
+```
+
+### Go Install
+
+```bash
+go install github.com/geoffyoungs/hop/cmd/hop@latest
+```
+
+### Build from Source
+
+```bash
+git clone https://github.com/geoffyoungs/hop.git
+cd hop
+make build
+sudo mv build/hop /usr/local/bin/
+```
 
 ## Configuration
 
@@ -148,16 +212,16 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ```bash
 # Build
-go build ./cmd/hop
+make build
 
 # Run tests
-go test ./...
+make test
 
 # Generate man pages
-go run ./cmd/gendocs
+make docs
 
 # Build release packages
-goreleaser build --snapshot --clean
+make dist
 ```
 
 ## License

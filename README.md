@@ -188,7 +188,44 @@ hop completion fish | source
 |------|-----------------|-----------------|
 | `ssh` (default) | `host` | `user`, `port`, `identity` |
 | `docker` | `container` | `shell` |
-| `k8s` | `pod` | `namespace`, `container`, `context`, `shell` |
+| `k8s` | `pod` OR `selector` OR `pod_grep` | `namespace`, `container`, `context`, `shell` |
+
+### Kubernetes Dynamic Pod Discovery
+
+For Kubernetes, you can specify pods in three ways:
+
+1. **Exact pod name** - use `pod` for a specific pod
+2. **Label selector** - use `selector` to find pods by labels (recommended)
+3. **Name pattern** - use `pod_grep` to find pods by name pattern
+
+```ini
+# Exact pod name
+[api-pod]
+type = k8s
+pod = api-server-7d8f6c9b5-abc12
+namespace = production
+
+# Label selector (recommended - finds any pod matching the labels)
+[api]
+type = k8s
+selector = app=api-server
+namespace = production
+container = app
+context = prod-cluster
+
+# Name pattern (grep-style matching)
+[scheduler]
+type = k8s
+pod_grep = background-scheduler
+namespace = production
+container = resque-scheduler
+context = prod-cluster
+shell = bash
+```
+
+Priority order: `pod` > `selector` > `pod_grep`
+
+This is useful for connecting to pods with dynamic names (e.g., deployments with random suffixes like `my-app-7d8f6c9b5-abc12`).
 
 ## Documentation
 

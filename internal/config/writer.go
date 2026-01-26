@@ -16,13 +16,13 @@ var ValidSSHProperties = []string{"type", "host", "user", "port", "identity"}
 var ValidDockerProperties = []string{"type", "container", "shell"}
 
 // ValidK8sProperties lists valid properties for Kubernetes backend
-var ValidK8sProperties = []string{"type", "namespace", "pod", "container", "context", "shell"}
+var ValidK8sProperties = []string{"type", "namespace", "pod", "container", "context", "shell", "selector", "pod_grep"}
 
 // AllValidProperties returns all valid property names across all backends
 var AllValidProperties = []string{
 	"type", "host", "user", "port", "identity",
 	"container", "shell", "namespace", "pod", "context",
-	"local_port", "remote_port",
+	"local_port", "remote_port", "selector", "pod_grep",
 }
 
 // AddHost adds a new host to the config file
@@ -205,8 +205,8 @@ func validateHostProperties(props map[string]string) error {
 			return fmt.Errorf("'container' is required for Docker backend")
 		}
 	case "k8s":
-		if props["pod"] == "" {
-			return fmt.Errorf("'pod' is required for Kubernetes backend")
+		if props["pod"] == "" && props["selector"] == "" && props["pod_grep"] == "" {
+			return fmt.Errorf("one of 'pod', 'selector', or 'pod_grep' is required for Kubernetes backend")
 		}
 	default:
 		return fmt.Errorf("unknown backend type %q (must be ssh, docker, or k8s)", backendType)

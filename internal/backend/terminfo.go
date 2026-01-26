@@ -80,16 +80,18 @@ func (d *DockerBackend) SyncTerminfo(ctx context.Context, host *Host) error {
 
 // K8s backend terminfo sync
 func (k *K8sBackend) SyncTerminfo(ctx context.Context, host *Host) error {
+	pod, err := k.resolvePod(ctx, host)
+	if err != nil {
+		return err
+	}
+
 	terminfo, err := GetTerminfo()
 	if err != nil {
 		return err
 	}
 
 	args := k.buildBaseArgs(host)
-	args = append(args, "exec", "-i")
-
-	pod := host.Properties["pod"]
-	args = append(args, pod)
+	args = append(args, "exec", "-i", pod)
 
 	if container := host.Properties["container"]; container != "" {
 		args = append(args, "-c", container)

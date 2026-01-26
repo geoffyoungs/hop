@@ -284,20 +284,30 @@ func TestK8sBackend_Validate_RequiresPod(t *testing.T) {
 		errMsg     string
 	}{
 		{
-			name:       "missing pod",
+			name:       "missing pod selector or grep",
 			properties: map[string]string{},
 			wantErr:    true,
-			errMsg:     "pod is required",
+			errMsg:     "one of pod, selector, or pod_grep is required",
 		},
 		{
-			name:       "empty pod",
-			properties: map[string]string{"pod": ""},
+			name:       "empty pod selector and grep",
+			properties: map[string]string{"pod": "", "selector": "", "pod_grep": ""},
 			wantErr:    true,
-			errMsg:     "pod is required",
+			errMsg:     "one of pod, selector, or pod_grep is required",
 		},
 		{
 			name:       "valid pod only",
 			properties: map[string]string{"pod": "my-pod"},
+			wantErr:    false,
+		},
+		{
+			name:       "valid selector only",
+			properties: map[string]string{"selector": "app=myapp"},
+			wantErr:    false,
+		},
+		{
+			name:       "valid pod_grep only",
+			properties: map[string]string{"pod_grep": "myapp-scheduler"},
 			wantErr:    false,
 		},
 		{
@@ -392,6 +402,93 @@ func TestParseKubectlVersion(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			version := parseKubectlVersion(tt.output)
 			assert.Equal(t, tt.want, version)
+		})
+	}
+}
+
+func TestK8sBackend_firstPodFromOutput(t *testing.T) {
+	b := &K8sBackend{}
+
+	tests := []struct {
+		name   string
+		output string
+		want   string
+	}{
+		{
+			name:   "single pod",
+			output: "pod/my-app-7d8f6c9b5-abc12\n",
+			want:   "my-app-7d8f6c9b5-abc12",
+		},
+		{
+			name:   "multiple pods returns first",
+			output: "pod/my-app-7d8f6c9b5-abc12\npod/my-app-7d8f6c9b5-def34\n",
+			want:   "my-app-7d8f6c9b5-abc12",
+		},
+		{
+			name:   "empty output",
+			output: "",
+			want:   "",
+		},
+		{
+			name:   "whitespace only",
+			output: "   \n",
+			want:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := b.firstPodFromOutput([]byte(tt.output))
+			assert.Equal(t, tt.want, result)
+		})
+	}
+}
+
+func TestK8sBackend_findPodByPattern(t *testing.T) {
+	b := &K8sBackend{}
+
+	output := `pod/web-frontend-7d8f6c9b5-abc12
+pod/web-kiosk-background-scheduler-8e9f7d6c5-def34
+pod/web-prism-background-scheduler-9f0g8e7d6-ghi56
+pod/redis-master-0
+`
+
+	tests := []struct {
+		name    string
+		pattern string
+		want    string
+	}{
+		{
+			name:    "match kiosk scheduler",
+			pattern: "web-kiosk-background-scheduler",
+			want:    "web-kiosk-background-scheduler-8e9f7d6c5-def34",
+		},
+		{
+			name:    "match prism scheduler",
+			pattern: "web-prism-background-scheduler",
+			want:    "web-prism-background-scheduler-9f0g8e7d6-ghi56",
+		},
+		{
+			name:    "match frontend",
+			pattern: "web-frontend",
+			want:    "web-frontend-7d8f6c9b5-abc12",
+		},
+		{
+			name:    "partial match",
+			pattern: "background-scheduler",
+			want:    "web-kiosk-background-scheduler-8e9f7d6c5-def34",
+		},
+		{
+			name:    "no match",
+			pattern: "nonexistent",
+			want:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := b.findPodByPattern([]byte(output), tt.pattern)
+			assert.Equal(t, tt.want, result)
 		})
 	}
 }

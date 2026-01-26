@@ -7,11 +7,15 @@ The Kubernetes backend provides shell access to pods in Kubernetes clusters usin
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `type` | **Yes** | - | Must be `k8s` |
-| `pod` | **Yes** | - | Pod name |
+| `pod` | One of these | - | Exact pod name |
+| `selector` | One of these | - | Label selector (e.g., `app=myapp`) |
+| `pod_grep` | One of these | - | Name pattern to grep for |
 | `namespace` | No | `default` | Kubernetes namespace |
 | `container` | No | - | Container name (required for multi-container pods) |
 | `context` | No | Current context | Kubernetes context |
 | `shell` | No | `/bin/sh` | Shell to execute |
+
+**Note:** You must specify one of `pod`, `selector`, or `pod_grep`. Priority order: `pod` > `selector` > `pod_grep`.
 
 ## Examples
 
@@ -57,6 +61,81 @@ type = k8s
 context = production-cluster
 namespace = api
 pod = api-server-xyz789
+```
+
+## Dynamic Pod Discovery
+
+When working with deployments, pod names include random suffixes (e.g., `myapp-7d8f9b6c5-x2j4k`). Rather than updating the config every time a pod restarts, use `selector` or `pod_grep` for dynamic discovery.
+
+### Using Label Selectors (Recommended)
+
+Label selectors use Kubernetes-native pod selection. This is the recommended approach as it's reliable and follows Kubernetes best practices.
+
+```ini
+[api]
+type = k8s
+selector = app=api-server
+namespace = production
+container = app
+context = prod-cluster
+```
+
+This runs: `kubectl get pods -l app=api-server -o name` and uses the first matching pod.
+
+You can use any valid Kubernetes label selector:
+
+```ini
+# Single label
+selector = app=myapp
+
+# Multiple labels (AND)
+selector = app=myapp,environment=prod
+
+# Set-based selectors
+selector = app in (web,api)
+```
+
+### Using Name Patterns
+
+If your pods don't have consistent labels, use `pod_grep` to match by name pattern:
+
+```ini
+[scheduler]
+type = k8s
+pod_grep = background-scheduler
+namespace = production
+container = resque-scheduler
+shell = bash
+```
+
+This runs: `kubectl get pods -o name` and finds the first pod containing "background-scheduler" in its name.
+
+### Real-World Example
+
+Replace shell scripts like this:
+
+```bash
+#!/bin/bash
+kubectl --context=prod-cluster exec \
+  $(kubectl --context=prod-cluster get pods | grep web-scheduler | awk '{print $1}') \
+  -c resque-scheduler -it -- bash
+```
+
+With a simple hop config:
+
+```ini
+[web-scheduler]
+type = k8s
+context = prod-cluster
+pod_grep = web-scheduler
+container = resque-scheduler
+shell = bash
+```
+
+Then just run:
+
+```bash
+hop web-scheduler
 ```
 
 ## Usage

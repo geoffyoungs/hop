@@ -151,7 +151,29 @@ func TestAddHost_MissingRequiredK8s(t *testing.T) {
 		"namespace": "default",
 	})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "'pod' is required")
+	assert.Contains(t, err.Error(), "one of 'pod', 'selector', or 'pod_grep' is required")
+}
+
+func TestAddHost_K8sWithSelector(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "hosts.ini")
+
+	err := AddHost(path, "test", map[string]string{
+		"type":     "k8s",
+		"selector": "app=myapp",
+	})
+	assert.NoError(t, err)
+}
+
+func TestAddHost_K8sWithPodGrep(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "hosts.ini")
+
+	err := AddHost(path, "test", map[string]string{
+		"type":     "k8s",
+		"pod_grep": "myapp-scheduler",
+	})
+	assert.NoError(t, err)
 }
 
 func TestAddHost_InvalidBackendType(t *testing.T) {

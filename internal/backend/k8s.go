@@ -1,6 +1,8 @@
 package backend
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -21,11 +23,13 @@ func (k *K8sBackend) Name() string {
 }
 
 func (k *K8sBackend) Connect(ctx context.Context, host *Host) error {
-	args := k.buildBaseArgs(host)
-	args = append(args, "exec", "-it")
+	pod, err := k.resolvePod(ctx, host)
+	if err != nil {
+		return err
+	}
 
-	pod := host.Properties["pod"]
-	args = append(args, pod)
+	args := k.buildBaseArgs(host)
+	args = append(args, "exec", "-it", pod)
 
 	if container := host.Properties["container"]; container != "" {
 		args = append(args, "-c", container)
@@ -46,10 +50,14 @@ func (k *K8sBackend) Connect(ctx context.Context, host *Host) error {
 }
 
 func (k *K8sBackend) Copy(ctx context.Context, host *Host, localPath, remotePath, direction string) error {
+	pod, err := k.resolvePod(ctx, host)
+	if err != nil {
+		return err
+	}
+
 	args := k.buildBaseArgs(host)
 	args = append(args, "cp")
 
-	pod := host.Properties["pod"]
 	namespace := host.Properties["namespace"]
 	if namespace == "" {
 		namespace = "default"
@@ -75,10 +83,13 @@ func (k *K8sBackend) Copy(ctx context.Context, host *Host, localPath, remotePath
 }
 
 func (k *K8sBackend) ForwardPort(ctx context.Context, host *Host, localPort, remotePort int) error {
+	pod, err := k.resolvePod(ctx, host)
+	if err != nil {
+		return err
+	}
+
 	args := k.buildBaseArgs(host)
 	args = append(args, "port-forward")
-
-	pod := host.Properties["pod"]
 	args = append(args, fmt.Sprintf("pod/%s", pod))
 	args = append(args, fmt.Sprintf("%d:%d", localPort, remotePort))
 
@@ -113,10 +124,89 @@ func (k *K8sBackend) Check() (*CheckResult, error) {
 }
 
 func (k *K8sBackend) Validate(host *Host) error {
-	if host.Properties["pod"] == "" {
-		return fmt.Errorf("pod is required for Kubernetes connections")
+	pod := host.Properties["pod"]
+	selector := host.Properties["selector"]
+	podGrep := host.Properties["pod_grep"]
+
+	if pod == "" && selector == "" && podGrep == "" {
+		return fmt.Errorf("one of pod, selector, or pod_grep is required for Kubernetes connections")
 	}
 	return nil
+}
+
+// resolvePod determines the pod name using the configured method.
+// Priority: pod (exact) > selector (label) > pod_grep (name pattern)
+func (k *K8sBackend) resolvePod(ctx context.Context, host *Host) (string, error) {
+	// Direct pod name takes priority
+	if pod := host.Properties["pod"]; pod != "" {
+		return pod, nil
+	}
+
+	baseArgs := k.buildBaseArgs(host)
+
+	// Label selector
+	if selector := host.Properties["selector"]; selector != "" {
+		args := append(baseArgs, "get", "pods", "-l", selector, "-o", "name", "--no-headers")
+		cmd := exec.CommandContext(ctx, "kubectl", args...)
+		output, err := cmd.Output()
+		if err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				return "", fmt.Errorf("failed to find pod with selector %q: %s", selector, exitErr.Stderr)
+			}
+			return "", fmt.Errorf("failed to find pod with selector %q: %w", selector, err)
+		}
+
+		pod := k.firstPodFromOutput(output)
+		if pod == "" {
+			return "", fmt.Errorf("no running pod found with selector %q", selector)
+		}
+		return pod, nil
+	}
+
+	// Pod name grep pattern
+	if pattern := host.Properties["pod_grep"]; pattern != "" {
+		args := append(baseArgs, "get", "pods", "-o", "name", "--no-headers")
+		cmd := exec.CommandContext(ctx, "kubectl", args...)
+		output, err := cmd.Output()
+		if err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				return "", fmt.Errorf("failed to list pods: %s", exitErr.Stderr)
+			}
+			return "", fmt.Errorf("failed to list pods: %w", err)
+		}
+
+		pod := k.findPodByPattern(output, pattern)
+		if pod == "" {
+			return "", fmt.Errorf("no running pod found matching pattern %q", pattern)
+		}
+		return pod, nil
+	}
+
+	return "", fmt.Errorf("no pod, selector, or pod_grep specified")
+}
+
+// firstPodFromOutput extracts the first pod name from kubectl output
+func (k *K8sBackend) firstPodFromOutput(output []byte) string {
+	scanner := bufio.NewScanner(bytes.NewReader(output))
+	if scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		// kubectl returns "pod/podname", strip the prefix
+		return strings.TrimPrefix(line, "pod/")
+	}
+	return ""
+}
+
+// findPodByPattern finds the first pod matching the given pattern
+func (k *K8sBackend) findPodByPattern(output []byte, pattern string) string {
+	scanner := bufio.NewScanner(bytes.NewReader(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		podName := strings.TrimPrefix(line, "pod/")
+		if strings.Contains(podName, pattern) {
+			return podName
+		}
+	}
+	return ""
 }
 
 func (k *K8sBackend) buildBaseArgs(host *Host) []string {

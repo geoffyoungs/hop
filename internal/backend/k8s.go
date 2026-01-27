@@ -127,15 +127,62 @@ func (k *K8sBackend) Validate(host *Host) error {
 	pod := host.Properties["pod"]
 	selector := host.Properties["selector"]
 	podGrep := host.Properties["pod_grep"]
+	deployment := host.Properties["deployment"]
 
-	if pod == "" && selector == "" && podGrep == "" {
-		return fmt.Errorf("one of pod, selector, or pod_grep is required for Kubernetes connections")
+	if pod == "" && selector == "" && podGrep == "" && deployment == "" {
+		return fmt.Errorf("one of pod, selector, pod_grep, or deployment is required for Kubernetes connections")
 	}
 	return nil
 }
 
+func (k *K8sBackend) BuildConnectCommand(ctx context.Context, host *Host) (string, []string, error) {
+	pod, err := k.resolvePod(ctx, host)
+	if err != nil {
+		return "", nil, err
+	}
+
+	args := k.buildBaseArgs(host)
+	args = append(args, "exec", "-it", pod)
+
+	if container := host.Properties["container"]; container != "" {
+		args = append(args, "-c", container)
+	}
+
+	shell := host.Properties["shell"]
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+	args = append(args, "--", shell)
+
+	return "kubectl", args, nil
+}
+
+func (k *K8sBackend) Exec(ctx context.Context, host *Host, command string) error {
+	pod, err := k.resolvePod(ctx, host)
+	if err != nil {
+		return err
+	}
+
+	args := k.buildBaseArgs(host)
+	args = append(args, "exec", pod)
+
+	if container := host.Properties["container"]; container != "" {
+		args = append(args, "-c", container)
+	}
+
+	// No -it for non-interactive
+	args = append(args, "--", "/bin/sh", "-c", command)
+
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
+}
+
 // resolvePod determines the pod name using the configured method.
-// Priority: pod (exact) > selector (label) > pod_grep (name pattern)
+// Priority: pod (exact) > selector (label) > deployment > pod_grep (name pattern)
 func (k *K8sBackend) resolvePod(ctx context.Context, host *Host) (string, error) {
 	// Direct pod name takes priority
 	if pod := host.Properties["pod"]; pod != "" {
@@ -163,6 +210,33 @@ func (k *K8sBackend) resolvePod(ctx context.Context, host *Host) (string, error)
 		return pod, nil
 	}
 
+	// Deployment name - uses app label convention
+	if deployment := host.Properties["deployment"]; deployment != "" {
+		// First try app=<deployment> label (common convention)
+		args := append(baseArgs, "get", "pods", "-l", "app="+deployment, "-o", "name", "--no-headers")
+		cmd := exec.CommandContext(ctx, "kubectl", args...)
+		output, err := cmd.Output()
+		if err == nil {
+			pod := k.firstPodFromOutput(output)
+			if pod != "" {
+				return pod, nil
+			}
+		}
+
+		// Fallback: try app.kubernetes.io/name=<deployment>
+		args = append(baseArgs[:len(baseArgs):len(baseArgs)], "get", "pods", "-l", "app.kubernetes.io/name="+deployment, "-o", "name", "--no-headers")
+		cmd = exec.CommandContext(ctx, "kubectl", args...)
+		output, err = cmd.Output()
+		if err == nil {
+			pod := k.firstPodFromOutput(output)
+			if pod != "" {
+				return pod, nil
+			}
+		}
+
+		return "", fmt.Errorf("no running pod found for deployment %q", deployment)
+	}
+
 	// Pod name grep pattern
 	if pattern := host.Properties["pod_grep"]; pattern != "" {
 		args := append(baseArgs, "get", "pods", "-o", "name", "--no-headers")
@@ -182,7 +256,7 @@ func (k *K8sBackend) resolvePod(ctx context.Context, host *Host) (string, error)
 		return pod, nil
 	}
 
-	return "", fmt.Errorf("no pod, selector, or pod_grep specified")
+	return "", fmt.Errorf("no pod, selector, deployment, or pod_grep specified")
 }
 
 // firstPodFromOutput extracts the first pod name from kubectl output

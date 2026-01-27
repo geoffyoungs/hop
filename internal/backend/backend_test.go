@@ -97,6 +97,36 @@ func TestSSHBackend_buildSSHArgs(t *testing.T) {
 			properties: map[string]string{"host": "example.com", "port": "2222", "identity": "~/.ssh/id_rsa"},
 			want:       []string{"-p", "2222", "-i", "~/.ssh/id_rsa"},
 		},
+		{
+			name:       "jump host",
+			properties: map[string]string{"host": "example.com", "jump": "bastion.example.com"},
+			want:       []string{"-J", "bastion.example.com"},
+		},
+		{
+			name:       "agent forwarding yes",
+			properties: map[string]string{"host": "example.com", "agent_forward": "yes"},
+			want:       []string{"-A"},
+		},
+		{
+			name:       "agent forwarding true",
+			properties: map[string]string{"host": "example.com", "agent_forward": "true"},
+			want:       []string{"-A"},
+		},
+		{
+			name:       "agent forwarding 1",
+			properties: map[string]string{"host": "example.com", "agent_forward": "1"},
+			want:       []string{"-A"},
+		},
+		{
+			name:       "agent forwarding no",
+			properties: map[string]string{"host": "example.com", "agent_forward": "no"},
+			want:       nil,
+		},
+		{
+			name:       "all options",
+			properties: map[string]string{"host": "example.com", "port": "2222", "identity": "~/.ssh/id_rsa", "jump": "bastion", "agent_forward": "yes"},
+			want:       []string{"-p", "2222", "-i", "~/.ssh/id_rsa", "-J", "bastion", "-A"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -135,6 +165,16 @@ func TestSSHBackend_buildSCPArgs(t *testing.T) {
 			name:       "identity file",
 			properties: map[string]string{"host": "example.com", "identity": "~/.ssh/id_rsa"},
 			want:       []string{"-i", "~/.ssh/id_rsa"},
+		},
+		{
+			name:       "jump host",
+			properties: map[string]string{"host": "example.com", "jump": "bastion.example.com"},
+			want:       []string{"-J", "bastion.example.com"},
+		},
+		{
+			name:       "all options",
+			properties: map[string]string{"host": "example.com", "port": "2222", "identity": "~/.ssh/id_rsa", "jump": "bastion"},
+			want:       []string{"-P", "2222", "-i", "~/.ssh/id_rsa", "-J", "bastion"},
 		},
 	}
 
@@ -217,6 +257,52 @@ func TestParseSSHVersion(t *testing.T) {
 	}
 }
 
+func TestSSHBackend_BuildConnectCommand(t *testing.T) {
+	b := &SSHBackend{}
+
+	tests := []struct {
+		name       string
+		properties map[string]string
+		wantCmd    string
+		wantArgs   []string
+	}{
+		{
+			name:       "basic host",
+			properties: map[string]string{"host": "example.com"},
+			wantCmd:    "ssh",
+			wantArgs:   []string{"example.com"},
+		},
+		{
+			name:       "host with user",
+			properties: map[string]string{"host": "example.com", "user": "admin"},
+			wantCmd:    "ssh",
+			wantArgs:   []string{"admin@example.com"},
+		},
+		{
+			name:       "with port and identity",
+			properties: map[string]string{"host": "example.com", "user": "admin", "port": "2222", "identity": "~/.ssh/key"},
+			wantCmd:    "ssh",
+			wantArgs:   []string{"-p", "2222", "-i", "~/.ssh/key", "admin@example.com"},
+		},
+		{
+			name:       "with jump and agent forward",
+			properties: map[string]string{"host": "example.com", "jump": "bastion", "agent_forward": "yes"},
+			wantCmd:    "ssh",
+			wantArgs:   []string{"-J", "bastion", "-A", "example.com"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			host := &Host{Name: "test", Type: "ssh", Properties: tt.properties}
+			cmd, args, err := b.BuildConnectCommand(nil, host)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantCmd, cmd)
+			assert.Equal(t, tt.wantArgs, args)
+		})
+	}
+}
+
 func TestDockerBackend_Name(t *testing.T) {
 	b := &DockerBackend{}
 	assert.Equal(t, "docker", b.Name())
@@ -235,13 +321,13 @@ func TestDockerBackend_Validate_RequiresContainer(t *testing.T) {
 			name:       "missing container",
 			properties: map[string]string{},
 			wantErr:    true,
-			errMsg:     "container is required",
+			errMsg:     "one of container, label, image, or image_grep is required",
 		},
 		{
 			name:       "empty container",
 			properties: map[string]string{"container": ""},
 			wantErr:    true,
-			errMsg:     "container is required",
+			errMsg:     "one of container, label, image, or image_grep is required",
 		},
 		{
 			name:       "valid container",
@@ -251,6 +337,21 @@ func TestDockerBackend_Validate_RequiresContainer(t *testing.T) {
 		{
 			name:       "valid with shell",
 			properties: map[string]string{"container": "my_app", "shell": "/bin/bash"},
+			wantErr:    false,
+		},
+		{
+			name:       "valid label only",
+			properties: map[string]string{"label": "app=myapp"},
+			wantErr:    false,
+		},
+		{
+			name:       "valid image only",
+			properties: map[string]string{"image": "nginx:latest"},
+			wantErr:    false,
+		},
+		{
+			name:       "valid image_grep only",
+			properties: map[string]string{"image_grep": "myapp"},
 			wantErr:    false,
 		},
 	}
@@ -287,13 +388,13 @@ func TestK8sBackend_Validate_RequiresPod(t *testing.T) {
 			name:       "missing pod selector or grep",
 			properties: map[string]string{},
 			wantErr:    true,
-			errMsg:     "one of pod, selector, or pod_grep is required",
+			errMsg:     "one of pod, selector, pod_grep, or deployment is required",
 		},
 		{
 			name:       "empty pod selector and grep",
 			properties: map[string]string{"pod": "", "selector": "", "pod_grep": ""},
 			wantErr:    true,
-			errMsg:     "one of pod, selector, or pod_grep is required",
+			errMsg:     "one of pod, selector, pod_grep, or deployment is required",
 		},
 		{
 			name:       "valid pod only",
@@ -308,6 +409,11 @@ func TestK8sBackend_Validate_RequiresPod(t *testing.T) {
 		{
 			name:       "valid pod_grep only",
 			properties: map[string]string{"pod_grep": "myapp-scheduler"},
+			wantErr:    false,
+		},
+		{
+			name:       "valid deployment only",
+			properties: map[string]string{"deployment": "my-deployment"},
 			wantErr:    false,
 		},
 		{

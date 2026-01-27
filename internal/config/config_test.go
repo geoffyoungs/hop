@@ -395,3 +395,246 @@ func TestGetByPrefix_SingleCharPrefix(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "staging", host.Name)
 }
+
+func TestLoadFromPath_EnvironmentExpansion(t *testing.T) {
+	tmpDir := t.TempDir()
+	iniPath := filepath.Join(tmpDir, "hosts.ini")
+
+	// Set up environment variables for testing
+	os.Setenv("TEST_HOP_HOST", "env.example.com")
+	os.Setenv("TEST_HOP_USER", "envuser")
+	defer os.Unsetenv("TEST_HOP_HOST")
+	defer os.Unsetenv("TEST_HOP_USER")
+
+	content := `[envhost]
+host = $TEST_HOP_HOST
+user = ${TEST_HOP_USER}
+port = 22
+`
+
+	err := os.WriteFile(iniPath, []byte(content), 0644)
+	require.NoError(t, err)
+
+	cfg, err := LoadFromPath(iniPath)
+	require.NoError(t, err)
+
+	host, ok := cfg.Get("envhost")
+	require.True(t, ok)
+	assert.Equal(t, "env.example.com", host.Host, "should expand $VAR syntax")
+	assert.Equal(t, "envuser", host.User, "should expand ${VAR} syntax")
+}
+
+func TestLoadFromPath_EnvironmentExpansion_Unset(t *testing.T) {
+	tmpDir := t.TempDir()
+	iniPath := filepath.Join(tmpDir, "hosts.ini")
+
+	// Ensure variable is not set
+	os.Unsetenv("TEST_HOP_UNSET_VAR")
+
+	content := `[envhost]
+host = $TEST_HOP_UNSET_VAR
+`
+
+	err := os.WriteFile(iniPath, []byte(content), 0644)
+	require.NoError(t, err)
+
+	cfg, err := LoadFromPath(iniPath)
+	require.NoError(t, err)
+
+	host, ok := cfg.Get("envhost")
+	require.True(t, ok)
+	assert.Equal(t, "", host.Host, "unset variable should expand to empty string")
+}
+
+func TestLoadFromPath_Inheritance(t *testing.T) {
+	tmpDir := t.TempDir()
+	iniPath := filepath.Join(tmpDir, "hosts.ini")
+
+	content := `[base]
+type = k8s
+context = prod-cluster
+namespace = production
+
+[api]
+extends = base
+pod_grep = api-server
+shell = /bin/bash
+
+[worker]
+extends = base
+pod_grep = worker
+`
+
+	err := os.WriteFile(iniPath, []byte(content), 0644)
+	require.NoError(t, err)
+
+	cfg, err := LoadFromPath(iniPath)
+	require.NoError(t, err)
+
+	// Test api inherits from base
+	api, ok := cfg.Get("api")
+	require.True(t, ok)
+	assert.Equal(t, "k8s", api.Type, "should inherit type from base")
+	assert.Equal(t, "prod-cluster", api.Context, "should inherit context from base")
+	assert.Equal(t, "production", api.Namespace, "should inherit namespace from base")
+	assert.Equal(t, "api-server", api.PodGrep, "should have own pod_grep")
+	assert.Equal(t, "/bin/bash", api.Shell, "should have own shell")
+
+	// Test worker inherits from base
+	worker, ok := cfg.Get("worker")
+	require.True(t, ok)
+	assert.Equal(t, "k8s", worker.Type, "should inherit type from base")
+	assert.Equal(t, "prod-cluster", worker.Context, "should inherit context from base")
+	assert.Equal(t, "production", worker.Namespace, "should inherit namespace from base")
+	assert.Equal(t, "worker", worker.PodGrep, "should have own pod_grep")
+}
+
+func TestLoadFromPath_InheritanceOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	iniPath := filepath.Join(tmpDir, "hosts.ini")
+
+	content := `[base]
+type = k8s
+context = prod-cluster
+namespace = production
+shell = /bin/sh
+
+[staging]
+extends = base
+context = staging-cluster
+namespace = staging
+pod_grep = app
+`
+
+	err := os.WriteFile(iniPath, []byte(content), 0644)
+	require.NoError(t, err)
+
+	cfg, err := LoadFromPath(iniPath)
+	require.NoError(t, err)
+
+	staging, ok := cfg.Get("staging")
+	require.True(t, ok)
+	assert.Equal(t, "k8s", staging.Type, "should inherit type")
+	assert.Equal(t, "staging-cluster", staging.Context, "should override context")
+	assert.Equal(t, "staging", staging.Namespace, "should override namespace")
+	assert.Equal(t, "/bin/sh", staging.Shell, "should inherit shell")
+}
+
+func TestLoadFromPath_InheritanceChain(t *testing.T) {
+	tmpDir := t.TempDir()
+	iniPath := filepath.Join(tmpDir, "hosts.ini")
+
+	content := `[grandparent]
+type = k8s
+context = cluster
+
+[parent]
+extends = grandparent
+namespace = myns
+
+[child]
+extends = parent
+pod_grep = app
+`
+
+	err := os.WriteFile(iniPath, []byte(content), 0644)
+	require.NoError(t, err)
+
+	cfg, err := LoadFromPath(iniPath)
+	require.NoError(t, err)
+
+	child, ok := cfg.Get("child")
+	require.True(t, ok)
+	assert.Equal(t, "k8s", child.Type, "should inherit type from grandparent")
+	assert.Equal(t, "cluster", child.Context, "should inherit context from grandparent")
+	assert.Equal(t, "myns", child.Namespace, "should inherit namespace from parent")
+	assert.Equal(t, "app", child.PodGrep, "should have own pod_grep")
+}
+
+func TestLoadFromPath_InheritanceCycleDetection(t *testing.T) {
+	tmpDir := t.TempDir()
+	iniPath := filepath.Join(tmpDir, "hosts.ini")
+
+	content := `[a]
+extends = b
+host = a.example.com
+
+[b]
+extends = a
+host = b.example.com
+`
+
+	err := os.WriteFile(iniPath, []byte(content), 0644)
+	require.NoError(t, err)
+
+	_, err = LoadFromPath(iniPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "circular inheritance")
+}
+
+func TestLoadFromPath_InheritanceMissingParent(t *testing.T) {
+	tmpDir := t.TempDir()
+	iniPath := filepath.Join(tmpDir, "hosts.ini")
+
+	content := `[child]
+extends = nonexistent
+host = example.com
+`
+
+	err := os.WriteFile(iniPath, []byte(content), 0644)
+	require.NoError(t, err)
+
+	_, err = LoadFromPath(iniPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestLoadFromPath_NewFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	iniPath := filepath.Join(tmpDir, "hosts.ini")
+
+	content := `[ssh-host]
+type = ssh
+host = example.com
+jump = bastion.example.com
+agent_forward = yes
+
+[docker-host]
+type = docker
+label = app=myapp
+image = nginx:latest
+image_grep = myapp
+
+[k8s-host]
+type = k8s
+selector = app=web
+pod_grep = scheduler
+deployment = my-deploy
+`
+
+	err := os.WriteFile(iniPath, []byte(content), 0644)
+	require.NoError(t, err)
+
+	cfg, err := LoadFromPath(iniPath)
+	require.NoError(t, err)
+
+	// Test SSH fields
+	ssh, ok := cfg.Get("ssh-host")
+	require.True(t, ok)
+	assert.Equal(t, "bastion.example.com", ssh.Jump)
+	assert.True(t, ssh.AgentForward)
+
+	// Test Docker fields
+	docker, ok := cfg.Get("docker-host")
+	require.True(t, ok)
+	assert.Equal(t, "app=myapp", docker.Label)
+	assert.Equal(t, "nginx:latest", docker.Image)
+	assert.Equal(t, "myapp", docker.ImageGrep)
+
+	// Test K8s fields
+	k8s, ok := cfg.Get("k8s-host")
+	require.True(t, ok)
+	assert.Equal(t, "app=web", k8s.Selector)
+	assert.Equal(t, "scheduler", k8s.PodGrep)
+	assert.Equal(t, "my-deploy", k8s.Deployment)
+}

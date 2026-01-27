@@ -185,3 +185,167 @@ func TestUitoa(t *testing.T) {
 		assert.Equal(t, tt.expected, result, "uitoa(%d)", tt.input)
 	}
 }
+
+func TestHostConfig_ToMap_SSH(t *testing.T) {
+	hc := &HostConfig{
+		Name:         "production",
+		Type:         "ssh",
+		Host:         "192.168.1.100",
+		User:         "admin",
+		Port:         2222,
+		Identity:     "~/.ssh/id_rsa",
+		Jump:         "bastion.example.com",
+		AgentForward: true,
+	}
+
+	props := hc.ToMap()
+
+	// Type is not included when it's "ssh" (default)
+	_, hasType := props["type"]
+	assert.False(t, hasType, "ssh type should not be included")
+	assert.Equal(t, "192.168.1.100", props["host"])
+	assert.Equal(t, "admin", props["user"])
+	assert.Equal(t, "2222", props["port"])
+	assert.Equal(t, "~/.ssh/id_rsa", props["identity"])
+	assert.Equal(t, "bastion.example.com", props["jump"])
+	assert.Equal(t, "yes", props["agent_forward"])
+}
+
+func TestHostConfig_ToMap_Docker(t *testing.T) {
+	hc := &HostConfig{
+		Name:      "mycontainer",
+		Type:      "docker",
+		Container: "my_app",
+		Shell:     "/bin/bash",
+		Label:     "app=myapp",
+		Image:     "nginx:latest",
+		ImageGrep: "myapp",
+	}
+
+	props := hc.ToMap()
+
+	assert.Equal(t, "docker", props["type"])
+	assert.Equal(t, "my_app", props["container"])
+	assert.Equal(t, "/bin/bash", props["shell"])
+	assert.Equal(t, "app=myapp", props["label"])
+	assert.Equal(t, "nginx:latest", props["image"])
+	assert.Equal(t, "myapp", props["image_grep"])
+}
+
+func TestHostConfig_ToMap_K8s(t *testing.T) {
+	hc := &HostConfig{
+		Name:       "mypod",
+		Type:       "k8s",
+		Namespace:  "production",
+		Pod:        "my-pod",
+		Container:  "app",
+		Context:    "my-cluster",
+		Selector:   "app=web",
+		PodGrep:    "scheduler",
+		Deployment: "my-deploy",
+	}
+
+	props := hc.ToMap()
+
+	assert.Equal(t, "k8s", props["type"])
+	assert.Equal(t, "production", props["namespace"])
+	assert.Equal(t, "my-pod", props["pod"])
+	assert.Equal(t, "app", props["container"])
+	assert.Equal(t, "my-cluster", props["context"])
+	assert.Equal(t, "app=web", props["selector"])
+	assert.Equal(t, "scheduler", props["pod_grep"])
+	assert.Equal(t, "my-deploy", props["deployment"])
+}
+
+func TestHostConfig_ToMap_DefaultsNotIncluded(t *testing.T) {
+	hc := &HostConfig{
+		Name:      "minimal",
+		Type:      "ssh",
+		Host:      "example.com",
+		Shell:     "/bin/sh",
+		Namespace: "default",
+	}
+
+	props := hc.ToMap()
+
+	// Default values should not be included
+	_, hasType := props["type"]
+	assert.False(t, hasType, "default type 'ssh' should not be included")
+
+	_, hasShell := props["shell"]
+	assert.False(t, hasShell, "default shell '/bin/sh' should not be included")
+
+	_, hasNamespace := props["namespace"]
+	assert.False(t, hasNamespace, "default namespace 'default' should not be included")
+}
+
+func TestHostConfig_ToMap_Default(t *testing.T) {
+	hc := &HostConfig{
+		Name:    "production",
+		Host:    "example.com",
+		Default: true,
+	}
+
+	props := hc.ToMap()
+
+	assert.Equal(t, "yes", props["default"])
+}
+
+func TestHostConfig_ToMap_Extends(t *testing.T) {
+	hc := &HostConfig{
+		Name:    "child",
+		Host:    "example.com",
+		Extends: "parent",
+	}
+
+	props := hc.ToMap()
+
+	assert.Equal(t, "parent", props["extends"])
+}
+
+func TestHostConfig_ToHost_NewSSHFields(t *testing.T) {
+	hc := &HostConfig{
+		Name:         "production",
+		Type:         "ssh",
+		Host:         "example.com",
+		Jump:         "bastion",
+		AgentForward: true,
+	}
+
+	host := hc.ToHost()
+
+	assert.Equal(t, "bastion", host.Properties["jump"])
+	assert.Equal(t, "yes", host.Properties["agent_forward"])
+}
+
+func TestHostConfig_ToHost_NewDockerFields(t *testing.T) {
+	hc := &HostConfig{
+		Name:      "mycontainer",
+		Type:      "docker",
+		Label:     "app=myapp",
+		Image:     "nginx",
+		ImageGrep: "myapp",
+	}
+
+	host := hc.ToHost()
+
+	assert.Equal(t, "app=myapp", host.Properties["label"])
+	assert.Equal(t, "nginx", host.Properties["image"])
+	assert.Equal(t, "myapp", host.Properties["image_grep"])
+}
+
+func TestHostConfig_ToHost_NewK8sFields(t *testing.T) {
+	hc := &HostConfig{
+		Name:       "mypod",
+		Type:       "k8s",
+		Selector:   "app=web",
+		PodGrep:    "scheduler",
+		Deployment: "my-deploy",
+	}
+
+	host := hc.ToHost()
+
+	assert.Equal(t, "app=web", host.Properties["selector"])
+	assert.Equal(t, "scheduler", host.Properties["pod_grep"])
+	assert.Equal(t, "my-deploy", host.Properties["deployment"])
+}

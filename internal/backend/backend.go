@@ -40,4 +40,11 @@ type Backend interface {
 
 	// Validate ensures host configuration is valid for this backend
 	Validate(host *Host) error
+
+	// BuildConnectCommand returns the command and arguments that would be used
+	// to connect, without actually executing. Used for --dry-run.
+	BuildConnectCommand(ctx context.Context, host *Host) (cmd string, args []string, err error)
+
+	// Exec runs a single command on the remote host (non-interactive)
+	Exec(ctx context.Context, host *Host, command string) error
 }

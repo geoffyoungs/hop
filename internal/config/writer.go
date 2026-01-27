@@ -10,19 +10,20 @@ import (
 )
 
 // ValidSSHProperties lists valid properties for SSH backend
-var ValidSSHProperties = []string{"type", "host", "user", "port", "identity"}
+var ValidSSHProperties = []string{"type", "host", "user", "port", "identity", "jump", "agent_forward"}
 
 // ValidDockerProperties lists valid properties for Docker backend
-var ValidDockerProperties = []string{"type", "container", "shell"}
+var ValidDockerProperties = []string{"type", "container", "shell", "label", "image", "image_grep"}
 
 // ValidK8sProperties lists valid properties for Kubernetes backend
-var ValidK8sProperties = []string{"type", "namespace", "pod", "container", "context", "shell", "selector", "pod_grep"}
+var ValidK8sProperties = []string{"type", "namespace", "pod", "container", "context", "shell", "selector", "pod_grep", "deployment"}
 
 // AllValidProperties returns all valid property names across all backends
 var AllValidProperties = []string{
-	"type", "host", "user", "port", "identity",
+	"type", "host", "user", "port", "identity", "jump", "agent_forward",
 	"container", "shell", "namespace", "pod", "context",
 	"local_port", "remote_port", "selector", "pod_grep",
+	"label", "image", "image_grep", "deployment", "default", "extends",
 }
 
 // AddHost adds a new host to the config file
@@ -201,12 +202,12 @@ func validateHostProperties(props map[string]string) error {
 			return fmt.Errorf("'host' is required for SSH backend")
 		}
 	case "docker":
-		if props["container"] == "" {
-			return fmt.Errorf("'container' is required for Docker backend")
+		if props["container"] == "" && props["label"] == "" && props["image"] == "" && props["image_grep"] == "" {
+			return fmt.Errorf("one of 'container', 'label', 'image', or 'image_grep' is required for Docker backend")
 		}
 	case "k8s":
-		if props["pod"] == "" && props["selector"] == "" && props["pod_grep"] == "" {
-			return fmt.Errorf("one of 'pod', 'selector', or 'pod_grep' is required for Kubernetes backend")
+		if props["pod"] == "" && props["selector"] == "" && props["pod_grep"] == "" && props["deployment"] == "" {
+			return fmt.Errorf("one of 'pod', 'selector', 'pod_grep', or 'deployment' is required for Kubernetes backend")
 		}
 	default:
 		return fmt.Errorf("unknown backend type %q (must be ssh, docker, or k8s)", backendType)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +32,11 @@ var (
 	userFlag     bool
 	addFlag      bool
 	terminalFlag bool
+	removeFlag   string
+	showFlag     string
+	editFlag     bool
+	dryRunFlag   bool
+	executeFlag  string
 )
 
 // RootCmd is the base command for hop
@@ -57,6 +63,11 @@ Examples:
   hop --copy server:/path file.txt            # Download file
   hop --forward "server 8080:80"              # Port forward
   hop --add myhost host=10.0.0.1 user=admin   # Add new host
+  hop --remove myhost                         # Remove a host
+  hop --show myhost                           # Show host configuration
+  hop --edit                                  # Open config in $EDITOR
+  hop --dry-run myhost                        # Show command without executing
+  hop myhost -e "whoami"                      # Execute command on remote host
   hop --local --list                          # List hosts from ./hosts.ini
   hop --terminal production                   # Sync terminfo then connect
 
@@ -91,6 +102,11 @@ func init() {
 	RootCmd.Flags().BoolVar(&userFlag, "user", false, "Use user config file (~/.config/hop/hosts.ini)")
 	RootCmd.Flags().BoolVar(&addFlag, "add", false, "Add a new host (usage: --add name key=value ...)")
 	RootCmd.Flags().BoolVar(&terminalFlag, "terminal", false, "Sync local terminfo to remote host before connecting")
+	RootCmd.Flags().StringVar(&removeFlag, "remove", "", "Remove a host from config")
+	RootCmd.Flags().StringVar(&showFlag, "show", "", "Show configuration for a host")
+	RootCmd.Flags().BoolVar(&editFlag, "edit", false, "Open config file in editor")
+	RootCmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "Show the command that would be executed")
+	RootCmd.Flags().StringVarP(&executeFlag, "execute", "e", "", "Execute a command on the remote host")
 
 	// Mark mutually exclusive flags
 	RootCmd.MarkFlagsMutuallyExclusive("local", "user", "config")
@@ -160,6 +176,18 @@ func runRoot(cmd *cobra.Command, args []string) error {
 
 	if addFlag {
 		return runAdd(args)
+	}
+
+	if removeFlag != "" {
+		return runRemove(removeFlag)
+	}
+
+	if showFlag != "" {
+		return runShow(showFlag)
+	}
+
+	if editFlag {
+		return runEdit()
 	}
 
 	if listFlag {
@@ -277,6 +305,58 @@ func runAdd(args []string) error {
 	return nil
 }
 
+func runRemove(alias string) error {
+	cfg, cleanAlias, err := loadConfigForAlias(alias)
+	if err != nil {
+		return err
+	}
+
+	// Verify host exists
+	_, err = cfg.GetByPrefix(cleanAlias)
+	if err != nil {
+		return err
+	}
+
+	path := getConfigPath()
+	if err := config.RemoveHost(path, cleanAlias); err != nil {
+		return err
+	}
+
+	fmt.Printf("Removed host %q from %s\n", cleanAlias, path)
+	return nil
+}
+
+func runShow(alias string) error {
+	cfg, cleanAlias, err := loadConfigForAlias(alias)
+	if err != nil {
+		return err
+	}
+
+	hostCfg, err := cfg.GetByPrefix(cleanAlias)
+	if err != nil {
+		return err
+	}
+
+	props := hostCfg.ToMap()
+	fmt.Print(config.FormatHostEntry(hostCfg.Name, props))
+	return nil
+}
+
+func runEdit() error {
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = "vi"
+	}
+
+	path := getConfigPath()
+	cmd := exec.Command(editor, path)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
+}
+
 func runCheck() error {
 	fmt.Println("Checking installed backends...")
 	fmt.Println()
@@ -369,6 +449,22 @@ func runConnectWithHost(hostCfg *config.HostConfig) error {
 	}
 
 	ctx := context.Background()
+
+	// Handle --dry-run
+	if dryRunFlag {
+		cmd, args, err := b.BuildConnectCommand(ctx, host)
+		if err != nil {
+			return fmt.Errorf("failed to build command: %v", err)
+		}
+		// Print command in a way that can be copy-pasted
+		fmt.Printf("%s %s\n", cmd, strings.Join(args, " "))
+		return nil
+	}
+
+	// Handle --execute / -e
+	if executeFlag != "" {
+		return b.Exec(ctx, host, executeFlag)
+	}
 
 	if terminalFlag {
 		if err := backend.SyncTerminfo(ctx, b, host); err != nil {

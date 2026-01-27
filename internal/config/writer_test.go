@@ -139,7 +139,7 @@ func TestAddHost_MissingRequiredDocker(t *testing.T) {
 		"type": "docker",
 	})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "'container' is required")
+	assert.Contains(t, err.Error(), "one of 'container', 'label', 'image', or 'image_grep' is required")
 }
 
 func TestAddHost_MissingRequiredK8s(t *testing.T) {
@@ -151,7 +151,7 @@ func TestAddHost_MissingRequiredK8s(t *testing.T) {
 		"namespace": "default",
 	})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "one of 'pod', 'selector', or 'pod_grep' is required")
+	assert.Contains(t, err.Error(), "one of 'pod', 'selector', 'pod_grep', or 'deployment' is required")
 }
 
 func TestAddHost_K8sWithSelector(t *testing.T) {
@@ -393,4 +393,158 @@ func TestCreateEmptyConfig(t *testing.T) {
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), info.Size())
+}
+
+func TestAddHost_SSHWithJumpAndAgentForward(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "hosts.ini")
+
+	err := AddHost(path, "test", map[string]string{
+		"host":          "example.com",
+		"jump":          "bastion.example.com",
+		"agent_forward": "yes",
+	})
+	require.NoError(t, err)
+
+	cfg, err := LoadFromPath(path)
+	require.NoError(t, err)
+
+	host, ok := cfg.Get("test")
+	require.True(t, ok)
+	assert.Equal(t, "bastion.example.com", host.Jump)
+	assert.True(t, host.AgentForward)
+}
+
+func TestAddHost_DockerWithLabel(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "hosts.ini")
+
+	err := AddHost(path, "test", map[string]string{
+		"type":  "docker",
+		"label": "app=myapp",
+	})
+	require.NoError(t, err)
+
+	cfg, err := LoadFromPath(path)
+	require.NoError(t, err)
+
+	host, ok := cfg.Get("test")
+	require.True(t, ok)
+	assert.Equal(t, "app=myapp", host.Label)
+}
+
+func TestAddHost_DockerWithImage(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "hosts.ini")
+
+	err := AddHost(path, "test", map[string]string{
+		"type":  "docker",
+		"image": "nginx:latest",
+	})
+	require.NoError(t, err)
+
+	cfg, err := LoadFromPath(path)
+	require.NoError(t, err)
+
+	host, ok := cfg.Get("test")
+	require.True(t, ok)
+	assert.Equal(t, "nginx:latest", host.Image)
+}
+
+func TestAddHost_DockerWithImageGrep(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "hosts.ini")
+
+	err := AddHost(path, "test", map[string]string{
+		"type":       "docker",
+		"image_grep": "myapp",
+	})
+	require.NoError(t, err)
+
+	cfg, err := LoadFromPath(path)
+	require.NoError(t, err)
+
+	host, ok := cfg.Get("test")
+	require.True(t, ok)
+	assert.Equal(t, "myapp", host.ImageGrep)
+}
+
+func TestAddHost_K8sWithDeployment(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "hosts.ini")
+
+	err := AddHost(path, "test", map[string]string{
+		"type":       "k8s",
+		"deployment": "my-deploy",
+	})
+	require.NoError(t, err)
+
+	cfg, err := LoadFromPath(path)
+	require.NoError(t, err)
+
+	host, ok := cfg.Get("test")
+	require.True(t, ok)
+	assert.Equal(t, "my-deploy", host.Deployment)
+}
+
+func TestAddHost_WithExtends(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "hosts.ini")
+
+	err := AddHost(path, "test", map[string]string{
+		"host":    "example.com",
+		"extends": "base",
+	})
+	require.NoError(t, err)
+}
+
+func TestValidateHostProperties_NewProperties(t *testing.T) {
+	// Test that all new properties are recognized as valid
+	tests := []struct {
+		name  string
+		props map[string]string
+	}{
+		{
+			name:  "ssh jump",
+			props: map[string]string{"host": "example.com", "jump": "bastion"},
+		},
+		{
+			name:  "ssh agent_forward",
+			props: map[string]string{"host": "example.com", "agent_forward": "yes"},
+		},
+		{
+			name:  "docker label",
+			props: map[string]string{"type": "docker", "label": "app=myapp"},
+		},
+		{
+			name:  "docker image",
+			props: map[string]string{"type": "docker", "image": "nginx"},
+		},
+		{
+			name:  "docker image_grep",
+			props: map[string]string{"type": "docker", "image_grep": "myapp"},
+		},
+		{
+			name:  "k8s deployment",
+			props: map[string]string{"type": "k8s", "deployment": "my-deploy"},
+		},
+		{
+			name:  "extends",
+			props: map[string]string{"host": "example.com", "extends": "base"},
+		},
+		{
+			name:  "default",
+			props: map[string]string{"host": "example.com", "default": "yes"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			path := filepath.Join(tmpDir, "hosts.ini")
+
+			err := AddHost(path, "test", tt.props)
+			assert.NoError(t, err, "property should be valid")
+		})
+	}
 }

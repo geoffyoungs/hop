@@ -41,47 +41,138 @@ func LoadFromPath(path string) (*Config, error) {
 		return nil, err
 	}
 
-	config := &Config{
-		Hosts: make(map[string]*HostConfig),
-	}
-
+	// Pass 1: Load all sections into raw maps
+	rawHosts := make(map[string]map[string]string)
 	for _, section := range cfg.Sections() {
 		name := section.Name()
 		if name == "DEFAULT" {
 			continue
 		}
 
-		host := &HostConfig{
-			Name:      name,
-			Type:      section.Key("type").MustString("ssh"),
-			Host:      section.Key("host").String(),
-			User:      section.Key("user").String(),
-			Port:      section.Key("port").MustInt(0),
-			Identity:  section.Key("identity").String(),
-			Container: section.Key("container").String(),
-			Shell:     section.Key("shell").MustString("/bin/sh"),
-			Namespace: section.Key("namespace").MustString("default"),
-			Pod:       section.Key("pod").String(),
-			Context:   section.Key("context").String(),
-			Default:   section.Key("default").MustBool(false),
+		props := make(map[string]string)
+		for _, key := range section.Keys() {
+			props[key.Name()] = key.String()
 		}
+		rawHosts[name] = props
+	}
 
-		// Parse port forwarding
-		if portStr := section.Key("local_port").String(); portStr != "" {
-			if p, err := strconv.Atoi(portStr); err == nil {
-				host.LocalPort = p
-			}
+	// Pass 2: Resolve inheritance chains and expand env vars
+	resolvedHosts := make(map[string]map[string]string)
+	for name := range rawHosts {
+		resolved, err := resolveInheritance(name, rawHosts, make(map[string]bool))
+		if err != nil {
+			return nil, fmt.Errorf("error resolving host %q: %w", name, err)
 		}
-		if portStr := section.Key("remote_port").String(); portStr != "" {
-			if p, err := strconv.Atoi(portStr); err == nil {
-				host.RemotePort = p
-			}
-		}
+		resolvedHosts[name] = resolved
+	}
 
+	// Pass 3: Convert to HostConfig structs
+	config := &Config{
+		Hosts: make(map[string]*HostConfig),
+	}
+
+	for name, props := range resolvedHosts {
+		host := hostConfigFromMap(name, props)
 		config.Hosts[name] = host
 	}
 
 	return config, nil
+}
+
+// resolveInheritance resolves the extends chain for a host
+func resolveInheritance(name string, rawHosts map[string]map[string]string, visited map[string]bool) (map[string]string, error) {
+	if visited[name] {
+		return nil, fmt.Errorf("circular inheritance detected involving %q", name)
+	}
+	visited[name] = true
+
+	props, ok := rawHosts[name]
+	if !ok {
+		return nil, fmt.Errorf("host %q not found", name)
+	}
+
+	// Check if this host extends another
+	extends := props["extends"]
+	if extends == "" {
+		// No inheritance, just expand env vars and return
+		result := make(map[string]string)
+		for k, v := range props {
+			result[k] = ExpandEnv(v)
+		}
+		return result, nil
+	}
+
+	// Resolve parent first
+	parent, err := resolveInheritance(extends, rawHosts, visited)
+	if err != nil {
+		return nil, err
+	}
+
+	// Merge: parent properties first, then child overrides
+	result := make(map[string]string)
+	for k, v := range parent {
+		result[k] = v
+	}
+	for k, v := range props {
+		if k != "extends" { // Don't copy extends property
+			result[k] = ExpandEnv(v)
+		}
+	}
+
+	return result, nil
+}
+
+// hostConfigFromMap creates a HostConfig from a properties map
+func hostConfigFromMap(name string, props map[string]string) *HostConfig {
+	host := &HostConfig{
+		Name:      name,
+		Type:      getStringOrDefault(props, "type", "ssh"),
+		Default:   parseAgentForward(props["default"]), // reuses bool parsing
+		// SSH fields
+		Host:         props["host"],
+		User:         props["user"],
+		Port:         parsePort(props["port"]),
+		Identity:     props["identity"],
+		Jump:         props["jump"],
+		AgentForward: parseAgentForward(props["agent_forward"]),
+		// Docker fields
+		Container: props["container"],
+		Shell:     getStringOrDefault(props, "shell", "/bin/sh"),
+		Label:     props["label"],
+		Image:     props["image"],
+		ImageGrep: props["image_grep"],
+		// K8s fields
+		Namespace:  getStringOrDefault(props, "namespace", "default"),
+		Pod:        props["pod"],
+		Context:    props["context"],
+		Selector:   props["selector"],
+		PodGrep:    props["pod_grep"],
+		Deployment: props["deployment"],
+		// Inheritance (not stored, already resolved)
+		Extends: "",
+		// Port forwarding
+		LocalPort:  parsePort(props["local_port"]),
+		RemotePort: parsePort(props["remote_port"]),
+	}
+	return host
+}
+
+func getStringOrDefault(props map[string]string, key, defaultVal string) string {
+	if v, ok := props[key]; ok && v != "" {
+		return v
+	}
+	return defaultVal
+}
+
+func parsePort(s string) int {
+	if s == "" {
+		return 0
+	}
+	p, err := strconv.Atoi(s)
+	if err != nil {
+		return 0
+	}
+	return p
 }
 
 // Get retrieves a host configuration by name
@@ -151,4 +242,10 @@ func (c *Config) DefaultHost() (*HostConfig, bool) {
 	}
 
 	return nil, false
+}
+
+// parseAgentForward parses agent_forward value (yes/true/1 -> true)
+func parseAgentForward(s string) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	return s == "yes" || s == "true" || s == "1"
 }

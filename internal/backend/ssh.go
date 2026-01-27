@@ -90,6 +90,24 @@ func (s *SSHBackend) Validate(host *Host) error {
 	return nil
 }
 
+func (s *SSHBackend) BuildConnectCommand(ctx context.Context, host *Host) (string, []string, error) {
+	args := s.buildSSHArgs(host)
+	args = append(args, s.buildDestination(host))
+	return "ssh", args, nil
+}
+
+func (s *SSHBackend) Exec(ctx context.Context, host *Host, command string) error {
+	args := s.buildSSHArgs(host)
+	args = append(args, s.buildDestination(host), command)
+
+	cmd := exec.CommandContext(ctx, "ssh", args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
+}
+
 func (s *SSHBackend) buildSSHArgs(host *Host) []string {
 	var args []string
 
@@ -98,6 +116,12 @@ func (s *SSHBackend) buildSSHArgs(host *Host) []string {
 	}
 	if identity := host.Properties["identity"]; identity != "" {
 		args = append(args, "-i", identity)
+	}
+	if jump := host.Properties["jump"]; jump != "" {
+		args = append(args, "-J", jump)
+	}
+	if af := host.Properties["agent_forward"]; af == "yes" || af == "true" || af == "1" {
+		args = append(args, "-A")
 	}
 
 	return args
@@ -111,6 +135,9 @@ func (s *SSHBackend) buildSCPArgs(host *Host) []string {
 	}
 	if identity := host.Properties["identity"]; identity != "" {
 		args = append(args, "-i", identity)
+	}
+	if jump := host.Properties["jump"]; jump != "" {
+		args = append(args, "-J", jump)
 	}
 
 	return args

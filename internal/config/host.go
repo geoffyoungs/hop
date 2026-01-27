@@ -5,8 +5,9 @@ import "github.com/geoff/hop/internal/backend"
 // HostConfig represents the parsed configuration for a single host
 type HostConfig struct {
 	// Common fields
-	Name string // Section name from INI file
-	Type string // Backend type: ssh, docker, k8s (defaults to "ssh")
+	Name    string // Section name from INI file
+	Type    string // Backend type: ssh, docker, k8s (defaults to "ssh")
+	Default bool   // Whether this is the default host
 
 	// SSH fields
 	Host     string // Hostname or IP address

@@ -1,9 +1,12 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
 
 	"gopkg.in/ini.v1"
 )
@@ -60,6 +63,7 @@ func LoadFromPath(path string) (*Config, error) {
 			Namespace: section.Key("namespace").MustString("default"),
 			Pod:       section.Key("pod").String(),
 			Context:   section.Key("context").String(),
+			Default:   section.Key("default").MustBool(false),
 		}
 
 		// Parse port forwarding
@@ -86,6 +90,40 @@ func (c *Config) Get(name string) (*HostConfig, bool) {
 	return host, ok
 }
 
+// GetByPrefix retrieves a host by exact name or unique prefix.
+// Returns the host and nil error if found uniquely.
+// Returns nil and an error if ambiguous (multiple matches) or not found.
+func (c *Config) GetByPrefix(prefix string) (*HostConfig, error) {
+	// Exact match takes priority
+	if host, ok := c.Hosts[prefix]; ok {
+		return host, nil
+	}
+
+	// Find all hosts that start with prefix
+	var matches []*HostConfig
+	for name, host := range c.Hosts {
+		if strings.HasPrefix(name, prefix) {
+			matches = append(matches, host)
+		}
+	}
+
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("host %q not found", prefix)
+	}
+
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+
+	// Ambiguous - multiple matches
+	names := make([]string, len(matches))
+	for i, m := range matches {
+		names[i] = m.Name
+	}
+	sort.Strings(names)
+	return nil, fmt.Errorf("ambiguous host %q matches: %s", prefix, strings.Join(names, ", "))
+}
+
 // Names returns all configured host names
 func (c *Config) Names() []string {
 	names := make([]string, 0, len(c.Hosts))
@@ -93,4 +131,24 @@ func (c *Config) Names() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// DefaultHost returns the default host if one is configured, or the only host if there's just one.
+// Returns the host config and true if found, nil and false otherwise.
+func (c *Config) DefaultHost() (*HostConfig, bool) {
+	names := c.Names()
+
+	// If only one host, return it
+	if len(names) == 1 {
+		return c.Hosts[names[0]], true
+	}
+
+	// Look for explicitly marked default
+	for _, host := range c.Hosts {
+		if host.Default {
+			return host, true
+		}
+	}
+
+	return nil, false
 }

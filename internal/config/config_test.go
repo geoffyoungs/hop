@@ -211,3 +211,187 @@ func TestDefaultConfigPath(t *testing.T) {
 	expected := filepath.Join(home, ".config", "hop", "hosts.ini")
 	assert.Equal(t, expected, path)
 }
+
+func TestDefaultHost_SingleHost(t *testing.T) {
+	cfg := &Config{
+		Hosts: map[string]*HostConfig{
+			"only": {Name: "only", Host: "example.com"},
+		},
+	}
+
+	host, ok := cfg.DefaultHost()
+	assert.True(t, ok)
+	assert.NotNil(t, host)
+	assert.Equal(t, "only", host.Name)
+}
+
+func TestDefaultHost_MarkedDefault(t *testing.T) {
+	cfg := &Config{
+		Hosts: map[string]*HostConfig{
+			"first":  {Name: "first", Host: "first.example.com"},
+			"second": {Name: "second", Host: "second.example.com", Default: true},
+			"third":  {Name: "third", Host: "third.example.com"},
+		},
+	}
+
+	host, ok := cfg.DefaultHost()
+	assert.True(t, ok)
+	assert.NotNil(t, host)
+	assert.Equal(t, "second", host.Name)
+}
+
+func TestDefaultHost_MultipleNoDefault(t *testing.T) {
+	cfg := &Config{
+		Hosts: map[string]*HostConfig{
+			"first":  {Name: "first", Host: "first.example.com"},
+			"second": {Name: "second", Host: "second.example.com"},
+		},
+	}
+
+	host, ok := cfg.DefaultHost()
+	assert.False(t, ok)
+	assert.Nil(t, host)
+}
+
+func TestDefaultHost_Empty(t *testing.T) {
+	cfg := &Config{
+		Hosts: map[string]*HostConfig{},
+	}
+
+	host, ok := cfg.DefaultHost()
+	assert.False(t, ok)
+	assert.Nil(t, host)
+}
+
+func TestLoadFromPath_DefaultYes(t *testing.T) {
+	tmpDir := t.TempDir()
+	iniPath := filepath.Join(tmpDir, "hosts.ini")
+
+	content := `[production]
+host = prod.example.com
+default = yes
+
+[staging]
+host = staging.example.com
+`
+
+	err := os.WriteFile(iniPath, []byte(content), 0644)
+	require.NoError(t, err)
+
+	cfg, err := LoadFromPath(iniPath)
+	require.NoError(t, err)
+
+	prod, ok := cfg.Get("production")
+	require.True(t, ok)
+	assert.True(t, prod.Default)
+
+	staging, ok := cfg.Get("staging")
+	require.True(t, ok)
+	assert.False(t, staging.Default)
+}
+
+func TestLoadFromPath_DefaultTrue(t *testing.T) {
+	tmpDir := t.TempDir()
+	iniPath := filepath.Join(tmpDir, "hosts.ini")
+
+	content := `[production]
+host = prod.example.com
+default = true
+
+[staging]
+host = staging.example.com
+`
+
+	err := os.WriteFile(iniPath, []byte(content), 0644)
+	require.NoError(t, err)
+
+	cfg, err := LoadFromPath(iniPath)
+	require.NoError(t, err)
+
+	prod, ok := cfg.Get("production")
+	require.True(t, ok)
+	assert.True(t, prod.Default)
+}
+
+func TestGetByPrefix_ExactMatch(t *testing.T) {
+	cfg := &Config{
+		Hosts: map[string]*HostConfig{
+			"production":  {Name: "production", Host: "prod.example.com"},
+			"prod-backup": {Name: "prod-backup", Host: "backup.example.com"},
+		},
+	}
+
+	// Exact match should return production, even though prod-backup also starts with "prod"
+	host, err := cfg.GetByPrefix("production")
+	require.NoError(t, err)
+	assert.Equal(t, "production", host.Name)
+}
+
+func TestGetByPrefix_UniquePrefix(t *testing.T) {
+	cfg := &Config{
+		Hosts: map[string]*HostConfig{
+			"production": {Name: "production", Host: "prod.example.com"},
+			"staging":    {Name: "staging", Host: "staging.example.com"},
+		},
+	}
+
+	// "prod" uniquely matches "production"
+	host, err := cfg.GetByPrefix("prod")
+	require.NoError(t, err)
+	assert.Equal(t, "production", host.Name)
+
+	// "stag" uniquely matches "staging"
+	host, err = cfg.GetByPrefix("stag")
+	require.NoError(t, err)
+	assert.Equal(t, "staging", host.Name)
+}
+
+func TestGetByPrefix_AmbiguousPrefix(t *testing.T) {
+	cfg := &Config{
+		Hosts: map[string]*HostConfig{
+			"production":  {Name: "production", Host: "prod.example.com"},
+			"prod-backup": {Name: "prod-backup", Host: "backup.example.com"},
+		},
+	}
+
+	// "prod" matches both hosts
+	host, err := cfg.GetByPrefix("prod")
+	assert.Nil(t, host)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ambiguous host")
+	assert.Contains(t, err.Error(), "prod-backup")
+	assert.Contains(t, err.Error(), "production")
+}
+
+func TestGetByPrefix_NoMatch(t *testing.T) {
+	cfg := &Config{
+		Hosts: map[string]*HostConfig{
+			"production": {Name: "production", Host: "prod.example.com"},
+			"staging":    {Name: "staging", Host: "staging.example.com"},
+		},
+	}
+
+	host, err := cfg.GetByPrefix("xyz")
+	assert.Nil(t, host)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestGetByPrefix_SingleCharPrefix(t *testing.T) {
+	cfg := &Config{
+		Hosts: map[string]*HostConfig{
+			"production": {Name: "production", Host: "prod.example.com"},
+			"staging":    {Name: "staging", Host: "staging.example.com"},
+		},
+	}
+
+	// "p" uniquely matches "production"
+	host, err := cfg.GetByPrefix("p")
+	require.NoError(t, err)
+	assert.Equal(t, "production", host.Name)
+
+	// "s" uniquely matches "staging"
+	host, err = cfg.GetByPrefix("s")
+	require.NoError(t, err)
+	assert.Equal(t, "staging", host.Name)
+}

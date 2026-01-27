@@ -45,7 +45,10 @@ Backends:
   k8s     Exec into Kubernetes pods
 
 Examples:
-  hop production                              # Connect to host
+  hop                                         # Connect to default/only host
+  hop .                                       # Connect to default in project config
+  hop ~                                       # Connect to default in user config
+  hop production                              # Connect to named host
   hop .production                             # Use project config only
   hop ~production                             # Use user config only
   hop --list                                  # List all hosts
@@ -64,6 +67,10 @@ Configuration:
     hop production      Search project config first, then user config
     hop .production     Use project config only (walk up to .git)
     hop ~production     Use user config only (~/.config/hop/hosts.ini)
+
+  Default host:
+    If only one host is configured, it becomes the default.
+    Or mark a host as default with: default = yes
 
   Flags:
     --local             Use ./hosts.ini only (no directory walking)
@@ -164,7 +171,16 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(args) == 0 {
-		return cmd.Help()
+		// Try to find default target
+		cfg, err := loadConfig()
+		if err != nil {
+			return cmd.Help()
+		}
+		host, ok := cfg.DefaultHost()
+		if !ok {
+			return cmd.Help()
+		}
+		return runConnectWithHost(host)
 	}
 
 	if copyFlag {
@@ -318,11 +334,29 @@ func runConnect(alias string) error {
 		return err
 	}
 
-	hostCfg, ok := cfg.Get(cleanAlias)
-	if !ok {
-		return fmt.Errorf("host %q not found in configuration", cleanAlias)
+	// If no alias specified, find default
+	if cleanAlias == "" {
+		host, ok := cfg.DefaultHost()
+		if !ok {
+			names := cfg.Names()
+			if len(names) == 0 {
+				return fmt.Errorf("no hosts configured")
+			}
+			sort.Strings(names)
+			return fmt.Errorf("multiple hosts configured, please specify one: %s", strings.Join(names, ", "))
+		}
+		return runConnectWithHost(host)
 	}
 
+	hostCfg, err := cfg.GetByPrefix(cleanAlias)
+	if err != nil {
+		return err
+	}
+
+	return runConnectWithHost(hostCfg)
+}
+
+func runConnectWithHost(hostCfg *config.HostConfig) error {
 	host := hostCfg.ToHost()
 
 	b, err := backend.Get(host.Type)
@@ -331,7 +365,7 @@ func runConnect(alias string) error {
 	}
 
 	if err := b.Validate(host); err != nil {
-		return fmt.Errorf("invalid configuration for %q: %v", cleanAlias, err)
+		return fmt.Errorf("invalid configuration for %q: %v", hostCfg.Name, err)
 	}
 
 	ctx := context.Background()
@@ -375,9 +409,9 @@ func runCopy(args []string) error {
 		return err
 	}
 
-	hostCfg, ok := cfg.Get(cleanAlias)
-	if !ok {
-		return fmt.Errorf("host %q not found in configuration", cleanAlias)
+	hostCfg, err := cfg.GetByPrefix(cleanAlias)
+	if err != nil {
+		return err
 	}
 
 	host := hostCfg.ToHost()
@@ -388,7 +422,7 @@ func runCopy(args []string) error {
 	}
 
 	if err := b.Validate(host); err != nil {
-		return fmt.Errorf("invalid configuration for %q: %v", cleanAlias, err)
+		return fmt.Errorf("invalid configuration for %q: %v", hostCfg.Name, err)
 	}
 
 	return b.Copy(context.Background(), host, localPath, remotePath, direction)
@@ -421,9 +455,9 @@ func runForward(forward string) error {
 		return err
 	}
 
-	hostCfg, ok := cfg.Get(cleanAlias)
-	if !ok {
-		return fmt.Errorf("host %q not found in configuration", cleanAlias)
+	hostCfg, err := cfg.GetByPrefix(cleanAlias)
+	if err != nil {
+		return err
 	}
 
 	host := hostCfg.ToHost()
@@ -434,10 +468,10 @@ func runForward(forward string) error {
 	}
 
 	if err := b.Validate(host); err != nil {
-		return fmt.Errorf("invalid configuration for %q: %v", cleanAlias, err)
+		return fmt.Errorf("invalid configuration for %q: %v", hostCfg.Name, err)
 	}
 
-	fmt.Printf("Forwarding localhost:%d -> %s:%d\n", localPort, cleanAlias, remotePort)
+	fmt.Printf("Forwarding localhost:%d -> %s:%d\n", localPort, hostCfg.Name, remotePort)
 	fmt.Println("Press Ctrl+C to stop")
 
 	return b.ForwardPort(context.Background(), host, localPort, remotePort)

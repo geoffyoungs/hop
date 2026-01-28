@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/geoff/hop/internal/backend"
 	"github.com/geoff/hop/internal/config"
@@ -38,6 +39,7 @@ var (
 	dryRunFlag     bool
 	executeFlag    string
 	installKeyFlag bool
+	rsyncFlag      bool
 )
 
 // RootCmd is the base command for hop
@@ -73,6 +75,10 @@ Examples:
   hop --terminal production                   # Sync terminfo then connect
   hop --install-key server                    # Install SSH public key on host
   hop --install-key server ~/.ssh/id_custom.pub  # Install a specific key
+  hop --rsync -- -avz src/ server:/path       # Rsync upload with archive+verbose+compress
+  hop --rsync -- server:/path/ ./local        # Rsync download
+  hop --rsync -- --delete src/ server:/path   # Rsync with delete
+  hop --rsync -- --exclude='*.log' s/ srv:/p  # Rsync with exclude patterns
 
 Configuration:
   Search order: ./hosts.ini -> parent dirs (up to .git) -> ~/.config/hop/hosts.ini
@@ -111,6 +117,7 @@ func init() {
 	RootCmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "Show the command that would be executed")
 	RootCmd.Flags().StringVarP(&executeFlag, "execute", "e", "", "Execute a command on the remote host")
 	RootCmd.Flags().BoolVar(&installKeyFlag, "install-key", false, "Install SSH public key on remote host")
+	RootCmd.Flags().BoolVar(&rsyncFlag, "rsync", false, "Sync files using rsync (usage: --rsync -- [options] source dest)")
 
 	// Mark mutually exclusive flags
 	RootCmd.MarkFlagsMutuallyExclusive("local", "user", "config")
@@ -173,7 +180,14 @@ func SetVersion(version, commit, date string) {
 	RootCmd.Version = fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date)
 }
 
-func runRoot(cmd *cobra.Command, args []string) error {
+func runRoot(cmd *cobra.Command, args []string) (retErr error) {
+	start := time.Now()
+	defer func() {
+		if retErr != nil && time.Since(start) > 60*time.Second {
+			cmd.SilenceUsage = true
+		}
+	}()
+
 	if checkFlag {
 		return runCheck()
 	}
@@ -217,6 +231,10 @@ func runRoot(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		}
 		return runConnectWithHost(host)
+	}
+
+	if rsyncFlag {
+		return runRsync(args)
 	}
 
 	if copyFlag {

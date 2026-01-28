@@ -32,11 +32,12 @@ var (
 	userFlag     bool
 	addFlag      bool
 	terminalFlag bool
-	removeFlag   string
-	showFlag     string
-	editFlag     bool
-	dryRunFlag   bool
-	executeFlag  string
+	removeFlag     string
+	showFlag       string
+	editFlag       bool
+	dryRunFlag     bool
+	executeFlag    string
+	installKeyFlag bool
 )
 
 // RootCmd is the base command for hop
@@ -70,6 +71,8 @@ Examples:
   hop myhost -e "whoami"                      # Execute command on remote host
   hop --local --list                          # List hosts from ./hosts.ini
   hop --terminal production                   # Sync terminfo then connect
+  hop --install-key server                    # Install SSH public key on host
+  hop --install-key server ~/.ssh/id_custom.pub  # Install a specific key
 
 Configuration:
   Search order: ./hosts.ini -> parent dirs (up to .git) -> ~/.config/hop/hosts.ini
@@ -107,6 +110,7 @@ func init() {
 	RootCmd.Flags().BoolVar(&editFlag, "edit", false, "Open config file in editor")
 	RootCmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "Show the command that would be executed")
 	RootCmd.Flags().StringVarP(&executeFlag, "execute", "e", "", "Execute a command on the remote host")
+	RootCmd.Flags().BoolVar(&installKeyFlag, "install-key", false, "Install SSH public key on remote host")
 
 	// Mark mutually exclusive flags
 	RootCmd.MarkFlagsMutuallyExclusive("local", "user", "config")
@@ -188,6 +192,10 @@ func runRoot(cmd *cobra.Command, args []string) error {
 
 	if editFlag {
 		return runEdit()
+	}
+
+	if installKeyFlag {
+		return runInstallKey(args)
 	}
 
 	if listFlag {
@@ -355,6 +363,48 @@ func runEdit() error {
 	cmd.Stderr = os.Stderr
 
 	return cmd.Run()
+}
+
+func runInstallKey(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: hop --install-key <alias> [public-key-path]")
+	}
+
+	alias := args[0]
+	cfg, cleanAlias, err := loadConfigForAlias(alias)
+	if err != nil {
+		return err
+	}
+
+	hostCfg, err := cfg.GetByPrefix(cleanAlias)
+	if err != nil {
+		return err
+	}
+
+	host := hostCfg.ToHost()
+
+	b, err := backend.Get(host.Type)
+	if err != nil {
+		return fmt.Errorf("unknown backend type %q", host.Type)
+	}
+
+	if err := b.Validate(host); err != nil {
+		return fmt.Errorf("invalid configuration for %q: %v", hostCfg.Name, err)
+	}
+
+	var pubKeyPath string
+	if len(args) >= 2 {
+		pubKeyPath = args[1]
+	} else {
+		pubKeyPath, err = backend.DiscoverPublicKey(host)
+		if err != nil {
+			return err
+		}
+	}
+
+	fmt.Printf("Installing %s on %s...\n", pubKeyPath, hostCfg.Name)
+	ctx := context.Background()
+	return backend.InstallKey(ctx, b, host, pubKeyPath)
 }
 
 func runCheck() error {

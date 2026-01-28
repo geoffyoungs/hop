@@ -20,7 +20,10 @@ Backends:
 
 .PP
 Examples:
-  hop production                              # Connect to host
+  hop                                         # Connect to default/only host
+  hop .                                       # Connect to default in project config
+  hop ~                                       # Connect to default in user config
+  hop production                              # Connect to named host
   hop .production                             # Use project config only
   hop ~production                             # Use user config only
   hop --list                                  # List all hosts
@@ -29,8 +32,15 @@ Examples:
   hop --copy server:/path file.txt            # Download file
   hop --forward "server 8080:80"              # Port forward
   hop --add myhost host=10.0.0.1 user=admin   # Add new host
+  hop --remove myhost                         # Remove a host
+  hop --show myhost                           # Show host configuration
+  hop --edit                                  # Open config in $EDITOR
+  hop --dry-run myhost                        # Show command without executing
+  hop myhost -e "whoami"                      # Execute command on remote host
   hop --local --list                          # List hosts from ./hosts.ini
   hop --terminal production                   # Sync terminfo then connect
+  hop --install-key server                    # Install SSH public key on host
+  hop --install-key server ~/.ssh/id_custom.pub  # Install a specific key
 
 .PP
 Configuration:
@@ -41,6 +51,11 @@ Prefix syntax:
     hop production      Search project config first, then user config
     hop .production     Use project config only (walk up to .git)
     hop ~production     Use user config only (~/.config/hop/hosts.ini)
+
+.PP
+Default host:
+    If only one host is configured, it becomes the default.
+    Or mark a host as default with: default = yes
 
 .PP
 Flags:
@@ -66,6 +81,18 @@ Flags:
 	Copy files to/from host (usage: --copy file alias:path)
 
 .PP
+\fB--dry-run\fP[=false]
+	Show the command that would be executed
+
+.PP
+\fB--edit\fP[=false]
+	Open config file in editor
+
+.PP
+\fB-e\fP, \fB--execute\fP=""
+	Execute a command on the remote host
+
+.PP
 \fB--forward\fP=""
 	Forward ports (usage: --forward "alias local:remote")
 
@@ -74,12 +101,24 @@ Flags:
 	help for hop
 
 .PP
+\fB--install-key\fP[=false]
+	Install SSH public key on remote host (usage: --install-key alias [key-path])
+
+.PP
 \fB--list\fP[=false]
 	List configured hosts
 
 .PP
 \fB--local\fP[=false]
 	Use local config file (./hosts.ini)
+
+.PP
+\fB--remove\fP=""
+	Remove a host from config
+
+.PP
+\fB--show\fP=""
+	Show configuration for a host
 
 .PP
 \fB--terminal\fP[=false]

@@ -85,9 +85,9 @@ func (s *VagrantSource) IsWritable() bool {
 	return false
 }
 
-// DefaultPaths returns empty - Vagrant sources are discovered from working directory
+// DefaultPaths returns Vagrantfile paths found in current and parent directories
 func (s *VagrantSource) DefaultPaths() []string {
-	return nil
+	return FindVagrantDirs()
 }
 
 // parseVagrantSSHConfig parses the output of vagrant ssh-config

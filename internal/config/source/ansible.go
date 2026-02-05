@@ -167,16 +167,57 @@ func (s *AnsibleSource) IsWritable() bool {
 
 // DefaultPaths returns the default Ansible inventory paths
 func (s *AnsibleSource) DefaultPaths() []string {
+	var paths []string
+
+	// Search current directory and parent directories (up to .git)
+	projectPaths := s.findProjectInventory()
+	paths = append(paths, projectPaths...)
+
+	// Add user and system paths
 	home, err := os.UserHomeDir()
+	if err == nil {
+		paths = append(paths,
+			filepath.Join(home, ".ansible", "inventory.yml"),
+			filepath.Join(home, ".ansible", "hosts.yml"),
+		)
+	}
+	paths = append(paths, "/etc/ansible/hosts")
+
+	return paths
+}
+
+// findProjectInventory searches for inventory files in current and parent directories
+func (s *AnsibleSource) findProjectInventory() []string {
+	var paths []string
+
+	dir, err := os.Getwd()
 	if err != nil {
-		return nil
+		return paths
 	}
 
-	return []string{
-		filepath.Join(home, ".ansible", "inventory.yml"),
-		filepath.Join(home, ".ansible", "hosts.yml"),
-		"/etc/ansible/hosts",
+	for {
+		// Check for inventory files in this directory
+		for _, name := range []string{"inventory.yml", "inventory.yaml", "hosts.yml", "hosts.yaml"} {
+			path := filepath.Join(dir, name)
+			if _, err := os.Stat(path); err == nil {
+				paths = append(paths, path)
+			}
+		}
+
+		// Check for .git (stop here, this is project root)
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			break
+		}
+
+		// Move to parent
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break // Reached filesystem root
+		}
+		dir = parent
 	}
+
+	return paths
 }
 
 // toString converts an interface{} to string

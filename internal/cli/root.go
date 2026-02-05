@@ -325,31 +325,26 @@ func loadConfig() (*config.Config, error) {
 func loadConfigForAlias(alias string) (*config.Config, string, error) {
 	cleanAlias, mode := parseAliasPrefix(alias)
 
-	// Check if multi-source flags are set
-	if allSourcesFlag || sourcesFlag != "" {
-		cfg, err := loadConfig()
+	// Handle prefix modes that require specific single-file configs
+	if mode == config.ModeProject {
+		path := config.ResolvePath(mode, "")
+		if path == "" {
+			return nil, cleanAlias, fmt.Errorf("no project config found (walked up to .git or filesystem root)")
+		}
+		cfg, err := config.LoadFromPath(path)
 		return cfg, cleanAlias, err
-	}
-
-	// If flags are set, they override prefix
-	if configPath != "" || localFlag || userFlag {
-		cfg, err := loadConfig()
-		return cfg, cleanAlias, err
-	}
-
-	path := config.ResolvePath(mode, "")
-
-	// Handle errors for prefix modes that require specific configs
-	if mode == config.ModeProject && path == "" {
-		return nil, cleanAlias, fmt.Errorf("no project config found (walked up to .git or filesystem root)")
 	}
 	if mode == config.ModeUser {
+		path := config.UserConfigPath()
 		if !config.ConfigExists(path) {
-			return nil, cleanAlias, fmt.Errorf("user config not found at %s", config.UserConfigPath())
+			return nil, cleanAlias, fmt.Errorf("user config not found at %s", path)
 		}
+		cfg, err := config.LoadFromPath(path)
+		return cfg, cleanAlias, err
 	}
 
-	cfg, err := config.LoadFromPath(path)
+	// Default mode: use loadConfig() which loads from all sources
+	cfg, err := loadConfig()
 	return cfg, cleanAlias, err
 }
 

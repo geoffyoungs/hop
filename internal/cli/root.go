@@ -375,18 +375,28 @@ func runRemove(alias string) error {
 		return err
 	}
 
-	// Verify host exists
-	_, err = cfg.GetByPrefix(cleanAlias)
+	// Verify host exists and check if it's from a writable source
+	hostCfg, err := cfg.GetByQualifiedName(cleanAlias)
 	if err != nil {
 		return err
 	}
 
-	path := getConfigPath()
-	if err := config.RemoveHost(path, cleanAlias); err != nil {
+	// Check if host is from a read-only source
+	if hostCfg.SourceReadOnly {
+		return fmt.Errorf("cannot remove host %q: source %q is read-only", hostCfg.Name, hostCfg.SourceName)
+	}
+
+	// Use the source path if available, otherwise fall back to config path
+	path := hostCfg.SourcePath
+	if path == "" {
+		path = getConfigPath()
+	}
+
+	if err := config.RemoveHost(path, hostCfg.Name); err != nil {
 		return err
 	}
 
-	fmt.Printf("Removed host %q from %s\n", cleanAlias, path)
+	fmt.Printf("Removed host %q from %s\n", hostCfg.Name, path)
 	return nil
 }
 
@@ -396,7 +406,7 @@ func runShow(alias string) error {
 		return err
 	}
 
-	hostCfg, err := cfg.GetByPrefix(cleanAlias)
+	hostCfg, err := cfg.GetByQualifiedName(cleanAlias)
 	if err != nil {
 		return err
 	}
@@ -432,7 +442,7 @@ func runInstallKey(args []string) error {
 		return err
 	}
 
-	hostCfg, err := cfg.GetByPrefix(cleanAlias)
+	hostCfg, err := cfg.GetByQualifiedName(cleanAlias)
 	if err != nil {
 		return err
 	}
@@ -542,13 +552,8 @@ func runConnect(alias string) error {
 		return runConnectWithHost(host)
 	}
 
-	// Try source-qualified name first (e.g., "ini:myhost")
-	var hostCfg *config.HostConfig
-	if strings.Contains(cleanAlias, ":") {
-		hostCfg, err = cfg.GetByQualifiedName(cleanAlias)
-	} else {
-		hostCfg, err = cfg.GetByPrefix(cleanAlias)
-	}
+	// Look up host (supports both regular names and source-qualified names like "ini:myhost")
+	hostCfg, err := cfg.GetByQualifiedName(cleanAlias)
 	if err != nil {
 		return err
 	}
@@ -625,7 +630,7 @@ func runCopy(args []string) error {
 		return err
 	}
 
-	hostCfg, err := cfg.GetByPrefix(cleanAlias)
+	hostCfg, err := cfg.GetByQualifiedName(cleanAlias)
 	if err != nil {
 		return err
 	}
@@ -671,7 +676,7 @@ func runForward(forward string) error {
 		return err
 	}
 
-	hostCfg, err := cfg.GetByPrefix(cleanAlias)
+	hostCfg, err := cfg.GetByQualifiedName(cleanAlias)
 	if err != nil {
 		return err
 	}

@@ -134,7 +134,7 @@ func runRsync(args []string) error {
 		return err
 	}
 
-	hostCfg, err := cfg.GetByPrefix(cleanAlias)
+	hostCfg, err := cfg.GetByQualifiedName(cleanAlias)
 	if err != nil {
 		return err
 	}

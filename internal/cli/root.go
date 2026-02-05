@@ -302,10 +302,7 @@ func parseAliasPrefix(alias string) (string, config.PathMode) {
 }
 
 func loadConfig() (*config.Config, error) {
-	// If multi-source flags are set, use LoadAll or LoadFromSources
-	if allSourcesFlag {
-		return config.LoadAll()
-	}
+	// If specific sources requested, load only those
 	if sourcesFlag != "" {
 		sources := strings.Split(sourcesFlag, ",")
 		for i, s := range sources {
@@ -314,9 +311,14 @@ func loadConfig() (*config.Config, error) {
 		return config.LoadFromSources(sources)
 	}
 
-	// Default: load from single INI config path
-	path := getConfigPath()
-	return config.LoadFromPath(path)
+	// If explicit config path or local/user flags, use single INI file
+	if configPath != "" || localFlag || userFlag {
+		path := getConfigPath()
+		return config.LoadFromPath(path)
+	}
+
+	// Default: load from all enabled sources
+	return config.LoadAll()
 }
 
 // loadConfigForAlias loads config based on alias prefix, returning the config and cleaned alias

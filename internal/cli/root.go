@@ -512,8 +512,14 @@ func runList(cfg *config.Config) error {
 	names := cfg.Names()
 	sort.Strings(names)
 
-	// Check if we should show source info (when using multi-source mode)
-	showSource := allSourcesFlag || sourcesFlag != ""
+	// Check if hosts come from multiple sources
+	sources := make(map[string]bool)
+	for _, name := range names {
+		if host, ok := cfg.Get(name); ok && host.SourceName != "" {
+			sources[host.SourceName] = true
+		}
+	}
+	showSource := len(sources) > 1 || allSourcesFlag || sourcesFlag != ""
 
 	for _, name := range names {
 		host, _ := cfg.Get(name)

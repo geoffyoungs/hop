@@ -4,7 +4,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/geoffyoungs/hop)](https://goreportcard.com/report/github.com/geoffyoungs/hop)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A CLI tool for connecting to named hosts using an INI configuration file. Supports SSH, Docker, and Kubernetes backends.
+A CLI tool for connecting to named hosts from multiple configuration sources. Supports SSH, Docker, and Kubernetes backends, with hosts loaded from INI files, Ansible inventory, SSH config, and Vagrant.
 
 ## Quick Start
 
@@ -182,13 +182,58 @@ eval "$(hop completion zsh)"
 hop completion fish | source
 ```
 
+## Host Sources
+
+Hop can load hosts from multiple configuration sources:
+
+| Source | File Type | Read | Write | Default |
+|--------|-----------|------|-------|---------|
+| `ini` | INI files (`hosts.ini`) | Yes | Yes | Enabled |
+| `ansible` | Ansible inventory (`inventory.yml`) | Yes | No | Enabled |
+| `sshconfig` | SSH config (`~/.ssh/config`) | Yes | No | Disabled (opt-in) |
+| `vagrant` | Vagrant VMs (via `vagrant ssh-config`) | Yes | No | Enabled |
+
+### Using Multiple Sources
+
+```bash
+# List hosts from all enabled sources
+hop --list --all-sources
+
+# List hosts from specific sources only
+hop --list --sources ini,ansible
+
+# Connect to a host from a specific source
+hop ini:production
+hop ansible:webserver
+```
+
+### Settings File
+
+Configure sources in `~/.config/hop/settings.toml`:
+
+```toml
+[sources]
+ini = true
+ansible = true
+sshconfig = false  # opt-in (can be noisy)
+vagrant = true
+priority = ["ini", "ansible", "vagrant", "sshconfig"]
+
+[sources.paths]
+ansible = ["~/.ansible/inventory.yml"]
+sshconfig = ["~/.ssh/config"]
+
+[collisions]
+strategy = "first"  # "first", "qualify", or "error"
+```
+
 ## Backend Types
 
 | Type | Required Fields | Optional Fields |
 |------|-----------------|-----------------|
-| `ssh` (default) | `host` | `user`, `port`, `identity` |
-| `docker` | `container` | `shell` |
-| `k8s` | `pod` OR `selector` OR `pod_grep` | `namespace`, `container`, `context`, `shell` |
+| `ssh` (default) | `host` | `user`, `port`, `identity`, `jump`, `agent_forward` |
+| `docker` | `container` OR `label` OR `image` OR `image_grep` | `shell` |
+| `k8s` | `pod` OR `selector` OR `pod_grep` OR `deployment` | `namespace`, `container`, `context`, `shell` |
 
 ### Kubernetes Dynamic Pod Discovery
 

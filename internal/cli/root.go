@@ -24,15 +24,15 @@ var (
 )
 
 var (
-	checkFlag    bool
-	listFlag     bool
-	copyFlag     bool
-	forwardFlag  string
-	configPath   string
-	localFlag    bool
-	userFlag     bool
-	addFlag      bool
-	terminalFlag bool
+	checkFlag      bool
+	listFlag       bool
+	copyFlag       bool
+	forwardFlag    string
+	configPath     string
+	localFlag      bool
+	userFlag       bool
+	addFlag        bool
+	terminalFlag   bool
 	removeFlag     string
 	showFlag       string
 	editFlag       bool
@@ -40,27 +40,38 @@ var (
 	executeFlag    string
 	installKeyFlag bool
 	rsyncFlag      bool
+	sourcesFlag    string
+	allSourcesFlag bool
 )
 
 // RootCmd is the base command for hop
 var RootCmd = &cobra.Command{
 	Use:   "hop [alias]",
 	Short: "Connect to named hosts via SSH, Docker, or Kubernetes",
-	Long: `Hop connects to named hosts defined in an INI configuration file.
+	Long: `Hop connects to named hosts from multiple configuration sources.
 
 Backends:
   ssh     Connect to remote servers via SSH (default)
   docker  Shell into running Docker containers
   k8s     Exec into Kubernetes pods
 
+Host Sources:
+  ini       INI config files (hosts.ini) - read/write
+  ansible   Ansible inventory files (inventory.yml) - read-only
+  sshconfig SSH config files (~/.ssh/config) - read-only, opt-in
+  vagrant   Vagrant VMs (via vagrant ssh-config) - read-only
+
 Examples:
   hop                                         # Connect to default/only host
   hop .                                       # Connect to default in project config
   hop ~                                       # Connect to default in user config
   hop production                              # Connect to named host
+  hop ini:production                          # Connect to host from specific source
   hop .production                             # Use project config only
   hop ~production                             # Use user config only
   hop --list                                  # List all hosts
+  hop --list --all-sources                    # List hosts from all enabled sources
+  hop --list --sources ini,ansible            # List hosts from specific sources
   hop --check                                 # Check backend availability
   hop --copy file.txt server:/path            # Upload file
   hop --copy server:/path file.txt            # Download file
@@ -83,8 +94,12 @@ Examples:
 Configuration:
   Search order: ./hosts.ini -> parent dirs (up to .git) -> ~/.config/hop/hosts.ini
 
+  Settings file: ~/.config/hop/settings.toml
+    Controls which sources are enabled and their priority.
+
   Prefix syntax:
     hop production      Search project config first, then user config
+    hop ini:production  Use host from specific source
     hop .production     Use project config only (walk up to .git)
     hop ~production     Use user config only (~/.config/hop/hosts.ini)
 
@@ -95,7 +110,9 @@ Configuration:
   Flags:
     --local             Use ./hosts.ini only (no directory walking)
     --user              Use ~/.config/hop/hosts.ini only
-    --config PATH       Use explicit config file path`,
+    --config PATH       Use explicit config file path
+    --sources SOURCES   Load from specific sources (comma-separated)
+    --all-sources       Load from all enabled sources`,
 	Args:              cobra.ArbitraryArgs,
 	RunE:              runRoot,
 	ValidArgsFunction: completeHostNames,
@@ -118,9 +135,14 @@ func init() {
 	RootCmd.Flags().StringVarP(&executeFlag, "execute", "e", "", "Execute a command on the remote host")
 	RootCmd.Flags().BoolVar(&installKeyFlag, "install-key", false, "Install SSH public key on remote host")
 	RootCmd.Flags().BoolVar(&rsyncFlag, "rsync", false, "Sync files using rsync (usage: --rsync -- [options] source dest)")
+	RootCmd.Flags().StringVar(&sourcesFlag, "sources", "", "Load hosts from specific sources (comma-separated: ini,ansible,sshconfig,vagrant)")
+	RootCmd.Flags().BoolVar(&allSourcesFlag, "all-sources", false, "Load hosts from all enabled sources")
 
 	// Mark mutually exclusive flags
 	RootCmd.MarkFlagsMutuallyExclusive("local", "user", "config")
+	RootCmd.MarkFlagsMutuallyExclusive("local", "sources", "all-sources")
+	RootCmd.MarkFlagsMutuallyExclusive("user", "sources", "all-sources")
+	RootCmd.MarkFlagsMutuallyExclusive("config", "sources", "all-sources")
 
 	RootCmd.AddCommand(completionCmd)
 }
@@ -280,6 +302,19 @@ func parseAliasPrefix(alias string) (string, config.PathMode) {
 }
 
 func loadConfig() (*config.Config, error) {
+	// If multi-source flags are set, use LoadAll or LoadFromSources
+	if allSourcesFlag {
+		return config.LoadAll()
+	}
+	if sourcesFlag != "" {
+		sources := strings.Split(sourcesFlag, ",")
+		for i, s := range sources {
+			sources[i] = strings.TrimSpace(s)
+		}
+		return config.LoadFromSources(sources)
+	}
+
+	// Default: load from single INI config path
 	path := getConfigPath()
 	return config.LoadFromPath(path)
 }
@@ -287,6 +322,12 @@ func loadConfig() (*config.Config, error) {
 // loadConfigForAlias loads config based on alias prefix, returning the config and cleaned alias
 func loadConfigForAlias(alias string) (*config.Config, string, error) {
 	cleanAlias, mode := parseAliasPrefix(alias)
+
+	// Check if multi-source flags are set
+	if allSourcesFlag || sourcesFlag != "" {
+		cfg, err := loadConfig()
+		return cfg, cleanAlias, err
+	}
 
 	// If flags are set, they override prefix
 	if configPath != "" || localFlag || userFlag {
@@ -464,13 +505,21 @@ func runList(cfg *config.Config) error {
 	names := cfg.Names()
 	sort.Strings(names)
 
+	// Check if we should show source info (when using multi-source mode)
+	showSource := allSourcesFlag || sourcesFlag != ""
+
 	for _, name := range names {
 		host, _ := cfg.Get(name)
 		hostType := host.Type
 		if hostType == "" {
 			hostType = "ssh"
 		}
-		fmt.Printf("  %s (%s)\n", name, hostType)
+
+		if showSource && host.SourceName != "" {
+			fmt.Printf("  %s (%s) [%s]\n", name, hostType, host.SourceName)
+		} else {
+			fmt.Printf("  %s (%s)\n", name, hostType)
+		}
 	}
 
 	return nil
@@ -496,7 +545,13 @@ func runConnect(alias string) error {
 		return runConnectWithHost(host)
 	}
 
-	hostCfg, err := cfg.GetByPrefix(cleanAlias)
+	// Try source-qualified name first (e.g., "ini:myhost")
+	var hostCfg *config.HostConfig
+	if strings.Contains(cleanAlias, ":") {
+		hostCfg, err = cfg.GetByQualifiedName(cleanAlias)
+	} else {
+		hostCfg, err = cfg.GetByPrefix(cleanAlias)
+	}
 	if err != nil {
 		return err
 	}

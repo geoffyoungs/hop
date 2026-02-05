@@ -598,3 +598,114 @@ pod/redis-master-0
 		})
 	}
 }
+
+func TestDockerBackend_BuildConnectCommand(t *testing.T) {
+	b := &DockerBackend{}
+
+	tests := []struct {
+		name       string
+		properties map[string]string
+		wantCmd    string
+		wantArgs   []string
+	}{
+		{
+			name:       "basic container with default shell",
+			properties: map[string]string{"container": "my_app"},
+			wantCmd:    "docker",
+			wantArgs:   []string{"exec", "-it", "my_app", "/bin/sh"},
+		},
+		{
+			name:       "container with custom shell",
+			properties: map[string]string{"container": "my_app", "shell": "/bin/bash"},
+			wantCmd:    "docker",
+			wantArgs:   []string{"exec", "-it", "my_app", "/bin/bash"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			host := &Host{Name: "test", Type: "docker", Properties: tt.properties}
+			cmd, args, err := b.BuildConnectCommand(nil, host)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantCmd, cmd)
+			assert.Equal(t, tt.wantArgs, args)
+		})
+	}
+}
+
+func TestParseDockerVersion(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   string
+	}{
+		{
+			name:   "standard docker version format",
+			output: "Docker version 24.0.7, build afdd53b",
+			want:   "24.0.7",
+		},
+		{
+			name:   "docker version with build info",
+			output: "Docker version 20.10.21, build baeda1f",
+			want:   "20.10.21",
+		},
+		{
+			name:   "unknown format",
+			output: "some other output",
+			want:   "some other output",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			version := parseDockerVersion(tt.output)
+			assert.Equal(t, tt.want, version)
+		})
+	}
+}
+
+func TestK8sBackend_BuildConnectCommand(t *testing.T) {
+	b := &K8sBackend{}
+
+	tests := []struct {
+		name       string
+		properties map[string]string
+		wantCmd    string
+		wantArgs   []string
+	}{
+		{
+			name:       "basic pod",
+			properties: map[string]string{"pod": "my-pod"},
+			wantCmd:    "kubectl",
+			wantArgs:   []string{"exec", "-it", "my-pod", "--", "/bin/sh"},
+		},
+		{
+			name:       "pod with namespace",
+			properties: map[string]string{"pod": "my-pod", "namespace": "production"},
+			wantCmd:    "kubectl",
+			wantArgs:   []string{"-n", "production", "exec", "-it", "my-pod", "--", "/bin/sh"},
+		},
+		{
+			name:       "pod with container",
+			properties: map[string]string{"pod": "my-pod", "container": "app"},
+			wantCmd:    "kubectl",
+			wantArgs:   []string{"exec", "-it", "my-pod", "-c", "app", "--", "/bin/sh"},
+		},
+		{
+			name:       "pod with namespace, context, container and shell",
+			properties: map[string]string{"pod": "my-pod", "namespace": "production", "context": "my-cluster", "container": "app", "shell": "/bin/bash"},
+			wantCmd:    "kubectl",
+			wantArgs:   []string{"-n", "production", "--context", "my-cluster", "exec", "-it", "my-pod", "-c", "app", "--", "/bin/bash"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			host := &Host{Name: "test", Type: "k8s", Properties: tt.properties}
+			cmd, args, err := b.BuildConnectCommand(nil, host)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantCmd, cmd)
+			assert.Equal(t, tt.wantArgs, args)
+		})
+	}
+}

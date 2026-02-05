@@ -8,12 +8,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/geoff/hop/internal/config/source"
 	"gopkg.in/ini.v1"
 )
 
 // Config holds all loaded host configurations
 type Config struct {
-	Hosts map[string]*HostConfig
+	Hosts    map[string]*HostConfig
+	Settings *Settings // Settings used to load this config (nil if loaded via LoadFromPath)
 }
 
 // DefaultConfigPath returns the default config file path following XDG conventions
@@ -248,4 +250,172 @@ func (c *Config) DefaultHost() (*HostConfig, bool) {
 func parseAgentForward(s string) bool {
 	s = strings.ToLower(strings.TrimSpace(s))
 	return s == "yes" || s == "true" || s == "1"
+}
+
+// LoadAll loads hosts from all enabled sources based on settings
+func LoadAll() (*Config, error) {
+	return LoadAllWithSettings(nil)
+}
+
+// LoadAllWithSettings loads hosts from all enabled sources using provided settings
+func LoadAllWithSettings(settings *Settings) (*Config, error) {
+	if settings == nil {
+		var err error
+		settings, err = LoadSettings()
+		if err != nil {
+			return nil, fmt.Errorf("failed to load settings: %w", err)
+		}
+	}
+
+	config := &Config{
+		Hosts:    make(map[string]*HostConfig),
+		Settings: settings,
+	}
+
+	// Track hosts by name for collision detection
+	hostSources := make(map[string]string) // hostname -> source name
+
+	// Load sources in priority order
+	for _, sourceName := range settings.GetPriority() {
+		if !settings.IsSourceEnabled(sourceName) {
+			continue
+		}
+
+		src, err := source.Get(sourceName)
+		if err != nil {
+			continue // Source not registered
+		}
+
+		// Get paths to load from
+		paths := settings.GetSourcePaths(sourceName)
+		if paths == nil {
+			paths = src.DefaultPaths()
+		}
+
+		// Load from each path
+		for _, path := range paths {
+			// Expand ~ in path
+			path = expandPath(path)
+
+			// Skip if file doesn't exist
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				continue
+			}
+
+			entries, err := src.Load(path)
+			if err != nil {
+				// Log but continue - don't fail entire load for one bad source
+				continue
+			}
+
+			for _, entry := range entries {
+				host := hostConfigFromEntry(entry, sourceName, path, !src.IsWritable())
+
+				// Handle collisions based on strategy
+				if existingSource, exists := hostSources[entry.Name]; exists {
+					switch settings.GetCollisionStrategy() {
+					case CollisionFirst:
+						// Skip - first source wins
+						continue
+					case CollisionQualify:
+						// Rename both with source prefix
+						qualifiedName := sourceName + ":" + entry.Name
+						host.Name = qualifiedName
+						// Also rename the existing one if not already qualified
+						if existing, ok := config.Hosts[entry.Name]; ok {
+							delete(config.Hosts, entry.Name)
+							existing.Name = existingSource + ":" + entry.Name
+							config.Hosts[existing.Name] = existing
+						}
+					case CollisionError:
+						return nil, fmt.Errorf("duplicate host %q found in sources %q and %q",
+							entry.Name, existingSource, sourceName)
+					}
+				}
+
+				config.Hosts[host.Name] = host
+				hostSources[entry.Name] = sourceName
+			}
+		}
+	}
+
+	return config, nil
+}
+
+// LoadFromSources loads hosts from specific sources only
+func LoadFromSources(sourceNames []string) (*Config, error) {
+	settings := DefaultSettings()
+
+	// Disable all sources
+	f := false
+	settings.Sources.INI = &f
+	settings.Sources.Ansible = &f
+	settings.Sources.SSHConfig = &f
+	settings.Sources.Vagrant = &f
+
+	// Enable only requested sources
+	t := true
+	for _, name := range sourceNames {
+		switch name {
+		case "ini":
+			settings.Sources.INI = &t
+		case "ansible":
+			settings.Sources.Ansible = &t
+		case "sshconfig":
+			settings.Sources.SSHConfig = &t
+		case "vagrant":
+			settings.Sources.Vagrant = &t
+		}
+	}
+
+	// Use the requested sources as priority
+	settings.Sources.Priority = sourceNames
+
+	return LoadAllWithSettings(settings)
+}
+
+// hostConfigFromEntry converts a source.HostEntry to a HostConfig
+func hostConfigFromEntry(entry *source.HostEntry, sourceName, sourcePath string, readOnly bool) *HostConfig {
+	host := hostConfigFromMap(entry.Name, entry.Properties)
+	host.SourceName = sourceName
+	host.SourcePath = sourcePath
+	host.SourceReadOnly = readOnly
+	return host
+}
+
+// expandPath expands ~ and environment variables in a path
+func expandPath(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			path = filepath.Join(home, path[2:])
+		}
+	}
+	return os.ExpandEnv(path)
+}
+
+// GetByQualifiedName retrieves a host by source-qualified name (e.g., "ini:myhost")
+func (c *Config) GetByQualifiedName(name string) (*HostConfig, error) {
+	// Check for source:name format
+	if idx := strings.Index(name, ":"); idx > 0 {
+		sourceName := name[:idx]
+		hostName := name[idx+1:]
+
+		// Look for exact match with qualified name
+		if host, ok := c.Hosts[name]; ok {
+			return host, nil
+		}
+
+		// Look for host from specific source
+		for _, host := range c.Hosts {
+			if host.SourceName == sourceName && host.Name == hostName {
+				return host, nil
+			}
+		}
+
+		return nil, fmt.Errorf("host %q not found in source %q", hostName, sourceName)
+	}
+
+	// Fall back to regular lookup
+	return c.GetByPrefix(name)
 }

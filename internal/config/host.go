@@ -18,11 +18,11 @@ type HostConfig struct {
 	AgentForward bool   // Enable SSH agent forwarding (-A)
 
 	// Docker fields
-	Container  string // Container name or ID
-	Shell      string // Shell to use (default: /bin/sh)
-	Label      string // Container label selector
-	Image      string // Container image name
-	ImageGrep  string // Container image pattern
+	Container string // Container name or ID
+	Shell     string // Shell to use (default: /bin/sh)
+	Label     string // Container label selector
+	Image     string // Container image name
+	ImageGrep string // Container image pattern
 
 	// K8s fields
 	Namespace  string // Kubernetes namespace (default: "default")
@@ -38,6 +38,11 @@ type HostConfig struct {
 
 	// Inheritance
 	Extends string // Name of host to inherit from
+
+	// Source tracking (not persisted to INI)
+	SourceName     string // Name of the source that loaded this host (e.g., "ini", "ansible")
+	SourcePath     string // Path to the file this host was loaded from
+	SourceReadOnly bool   // Whether the source supports write operations
 }
 
 // ToMap returns the host configuration as a map of property names to values

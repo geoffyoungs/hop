@@ -12,6 +12,7 @@ hop [command]
 | Command | Description |
 |---------|-------------|
 | `hop <alias>` | Connect to the specified host |
+| `hop <source>:<alias>` | Connect to host from a specific source |
 | `hop completion <shell>` | Generate shell completion scripts |
 | `hop help` | Help about any command |
 
@@ -19,11 +20,38 @@ hop [command]
 
 | Flag | Description |
 |------|-------------|
-| `--config <path>` | Use a specific config file |
+| `--config <path>` | Use a specific config file (disables multi-source) |
 | `--local` | Use local config file (`./hosts.ini`) |
 | `--user` | Use user config file (`~/.config/hop/hosts.ini`) |
+| `--sources <list>` | Load from specific sources (comma-separated) |
+| `--all-sources` | Load from all enabled sources (default) |
 | `-h, --help` | Help for hop |
 | `-v, --version` | Version information |
+
+## Host Sources
+
+Hop loads hosts from multiple sources by default:
+
+| Source | Description | Read | Write |
+|--------|-------------|------|-------|
+| `ini` | INI config files (`hosts.ini`) | Yes | Yes |
+| `ansible` | Ansible inventory (`inventory.yml`) | Yes | No |
+| `sshconfig` | SSH config (`~/.ssh/config`) | Yes | No |
+| `vagrant` | Vagrant VMs | Yes | No |
+
+Configure sources in `~/.config/hop/settings.toml`:
+
+```toml
+[sources]
+ini = true
+ansible = true
+sshconfig = false  # opt-in
+vagrant = true
+priority = ["ini", "ansible", "vagrant", "sshconfig"]
+
+[collisions]
+strategy = "first"  # "first", "qualify", or "error"
+```
 
 ## Operation Flags
 
@@ -52,12 +80,17 @@ List all configured hosts.
 hop --list
 ```
 
-Output:
+Output (shows source tags when hosts come from multiple sources):
 ```
-  mycontainer (docker)
-  mypod (k8s)
-  production (ssh)
-  staging (ssh)
+  mycontainer (docker) [ini]
+  mypod (k8s) [ini]
+  production (ssh) [ini]
+  webserver (ssh) [ansible]
+```
+
+List from specific sources:
+```bash
+hop --list --sources ini,ansible
 ```
 
 ### `--add`

@@ -1,16 +1,14 @@
 .nh
-.TH "HOP" "1" "Jan 2026" "Hop" "User Commands"
+.TH "HOP" "1" "Feb 2026" "Hop" "User Commands"
 
 .SH NAME
 hop - Connect to named hosts via SSH, Docker, or Kubernetes
 
-
 .SH SYNOPSIS
 \fBhop [alias] [flags]\fP
 
-
 .SH DESCRIPTION
-Hop connects to named hosts defined in an INI configuration file.
+Hop connects to named hosts from multiple configuration sources including INI files, Ansible inventory, SSH config, and Vagrant.
 
 .PP
 Backends:
@@ -19,14 +17,21 @@ Backends:
   k8s     Exec into Kubernetes pods
 
 .PP
+Host Sources:
+  ini       INI config files (hosts.ini) - read/write
+  ansible   Ansible inventory files (inventory.yml) - read-only
+  sshconfig SSH config files (~/.ssh/config) - read-only, opt-in
+  vagrant   Vagrant VMs (via vagrant ssh-config) - read-only
+
+.PP
 Examples:
   hop                                         # Connect to default/only host
-  hop .                                       # Connect to default in project config
-  hop ~                                       # Connect to default in user config
   hop production                              # Connect to named host
+  hop ansible:webserver                       # Connect to host from specific source
   hop .production                             # Use project config only
   hop ~production                             # Use user config only
   hop --list                                  # List all hosts
+  hop --list --sources ini,ansible            # List hosts from specific sources
   hop --check                                 # Check backend availability
   hop --copy file.txt server:/path            # Upload file
   hop --copy server:/path file.txt            # Download file
@@ -37,18 +42,19 @@ Examples:
   hop --edit                                  # Open config in $EDITOR
   hop --dry-run myhost                        # Show command without executing
   hop myhost -e "whoami"                      # Execute command on remote host
-  hop --local --list                          # List hosts from ./hosts.ini
   hop --terminal production                   # Sync terminfo then connect
   hop --install-key server                    # Install SSH public key on host
-  hop --install-key server ~/.ssh/id_custom.pub  # Install a specific key
+  hop --rsync -- -avz src/ server:/path       # Rsync with archive+verbose+compress
 
 .PP
 Configuration:
-  Search order: ./hosts.ini -> parent dirs (up to .git) -> ~/.config/hop/hosts.ini
+  Hosts are loaded from multiple sources by default. Configure which sources
+  are enabled in ~/.config/hop/settings.toml.
 
 .PP
 Prefix syntax:
-    hop production      Search project config first, then user config
+    hop production      Search all sources
+    hop ini:production  Use host from specific source
     hop .production     Use project config only (walk up to .git)
     hop ~production     Use user config only (~/.config/hop/hosts.ini)
 
@@ -57,16 +63,13 @@ Default host:
     If only one host is configured, it becomes the default.
     Or mark a host as default with: default = yes
 
-.PP
-Flags:
-    --local             Use ./hosts.ini only (no directory walking)
-    --user              Use ~/.config/hop/hosts.ini only
-    --config PATH       Use explicit config file path
-
-
 .SH OPTIONS
 \fB--add\fP[=false]
 	Add a new host (usage: --add name key=value ...)
+
+.PP
+\fB--all-sources\fP[=false]
+	Load hosts from all enabled sources (default behavior)
 
 .PP
 \fB--check\fP[=false]
@@ -74,7 +77,7 @@ Flags:
 
 .PP
 \fB--config\fP=""
-	Path to config file
+	Path to config file (disables multi-source loading)
 
 .PP
 \fB--copy\fP[=false]
@@ -102,7 +105,7 @@ Flags:
 
 .PP
 \fB--install-key\fP[=false]
-	Install SSH public key on remote host (usage: --install-key alias [key-path])
+	Install SSH public key on remote host
 
 .PP
 \fB--list\fP[=false]
@@ -117,8 +120,16 @@ Flags:
 	Remove a host from config
 
 .PP
+\fB--rsync\fP[=false]
+	Sync files using rsync (usage: --rsync -- [options] source dest)
+
+.PP
 \fB--show\fP=""
 	Show configuration for a host
+
+.PP
+\fB--sources\fP=""
+	Load hosts from specific sources (comma-separated: ini,ansible,sshconfig,vagrant)
 
 .PP
 \fB--terminal\fP[=false]
@@ -128,6 +139,22 @@ Flags:
 \fB--user\fP[=false]
 	Use user config file (~/.config/hop/hosts.ini)
 
+.PP
+\fB-v\fP, \fB--version\fP[=false]
+	version for hop
+
+.SH FILES
+.TP
+~/.config/hop/hosts.ini
+User host configuration file (INI format)
+
+.TP
+~/.config/hop/settings.toml
+Settings file controlling which sources are enabled
+
+.TP
+./hosts.ini
+Project-local host configuration
 
 .SH SEE ALSO
-\fBhop-completion(1)\fP
+\fBhop-completion(1)\fP, \fBssh(1)\fP, \fBdocker(1)\fP, \fBkubectl(1)\fP

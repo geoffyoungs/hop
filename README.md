@@ -24,10 +24,6 @@ hop production
 ### Homebrew (macOS/Linux)
 
 ```bash
-# Add the tap and install
-brew install geoffyoungs/tap/hop
-
-# Or in one command
 brew install geoffyoungs/tap/hop
 ```
 
@@ -41,12 +37,12 @@ Download the `.deb` package from the [releases page](https://github.com/geoffyou
 
 ```bash
 # For x86_64/amd64
-curl -LO https://github.com/geoffyoungs/hop/releases/download/v0.1.0-beta/hop_0.1.0-beta_linux_amd64.deb
-sudo dpkg -i hop_0.1.0-beta_linux_amd64.deb
+curl -LO https://github.com/geoffyoungs/hop/releases/download/v0.5.0/hop_0.5.0_linux_amd64.deb
+sudo dpkg -i hop_0.5.0_linux_amd64.deb
 
 # For ARM64
-curl -LO https://github.com/geoffyoungs/hop/releases/download/v0.1.0-beta/hop_0.1.0-beta_linux_arm64.deb
-sudo dpkg -i hop_0.1.0-beta_linux_arm64.deb
+curl -LO https://github.com/geoffyoungs/hop/releases/download/v0.5.0/hop_0.5.0_linux_arm64.deb
+sudo dpkg -i hop_0.5.0_linux_arm64.deb
 ```
 
 ### Fedora/RHEL/CentOS (rpm)
@@ -55,12 +51,12 @@ Download the `.rpm` package from the [releases page](https://github.com/geoffyou
 
 ```bash
 # For x86_64/amd64
-curl -LO https://github.com/geoffyoungs/hop/releases/download/v0.1.0-beta/hop_0.1.0-beta_linux_amd64.rpm
-sudo rpm -i hop_0.1.0-beta_linux_amd64.rpm
+curl -LO https://github.com/geoffyoungs/hop/releases/download/v0.5.0/hop_0.5.0_linux_amd64.rpm
+sudo rpm -i hop_0.5.0_linux_amd64.rpm
 
 # For ARM64
-curl -LO https://github.com/geoffyoungs/hop/releases/download/v0.1.0-beta/hop_0.1.0-beta_linux_arm64.rpm
-sudo rpm -i hop_0.1.0-beta_linux_arm64.rpm
+curl -LO https://github.com/geoffyoungs/hop/releases/download/v0.5.0/hop_0.5.0_linux_arm64.rpm
+sudo rpm -i hop_0.5.0_linux_arm64.rpm
 ```
 
 ### Binary Download (All Platforms)
@@ -69,16 +65,16 @@ Download the appropriate archive from the [releases page](https://github.com/geo
 
 | Platform | Architecture | Download |
 |----------|--------------|----------|
-| macOS | Intel (x86_64) | [hop_0.1.0-beta_darwin_amd64.tar.gz](https://github.com/geoffyoungs/hop/releases/download/v0.1.0-beta/hop_0.1.0-beta_darwin_amd64.tar.gz) |
-| macOS | Apple Silicon (ARM64) | [hop_0.1.0-beta_darwin_arm64.tar.gz](https://github.com/geoffyoungs/hop/releases/download/v0.1.0-beta/hop_0.1.0-beta_darwin_arm64.tar.gz) |
-| Linux | x86_64 | [hop_0.1.0-beta_linux_amd64.tar.gz](https://github.com/geoffyoungs/hop/releases/download/v0.1.0-beta/hop_0.1.0-beta_linux_amd64.tar.gz) |
-| Linux | ARM64 | [hop_0.1.0-beta_linux_arm64.tar.gz](https://github.com/geoffyoungs/hop/releases/download/v0.1.0-beta/hop_0.1.0-beta_linux_arm64.tar.gz) |
+| macOS | Intel (x86_64) | [hop_0.5.0_darwin_amd64.tar.gz](https://github.com/geoffyoungs/hop/releases/download/v0.5.0/hop_0.5.0_darwin_amd64.tar.gz) |
+| macOS | Apple Silicon (ARM64) | [hop_0.5.0_darwin_arm64.tar.gz](https://github.com/geoffyoungs/hop/releases/download/v0.5.0/hop_0.5.0_darwin_arm64.tar.gz) |
+| Linux | x86_64 | [hop_0.5.0_linux_amd64.tar.gz](https://github.com/geoffyoungs/hop/releases/download/v0.5.0/hop_0.5.0_linux_amd64.tar.gz) |
+| Linux | ARM64 | [hop_0.5.0_linux_arm64.tar.gz](https://github.com/geoffyoungs/hop/releases/download/v0.5.0/hop_0.5.0_linux_arm64.tar.gz) |
 
 Extract and install:
 
 ```bash
 # Example for macOS ARM64
-tar -xzf hop_0.1.0-beta_darwin_arm64.tar.gz
+tar -xzf hop_0.5.0_darwin_arm64.tar.gz
 sudo mv hop /usr/local/bin/
 
 # Optional: install man pages
@@ -143,11 +139,20 @@ hop --add api type=k8s namespace=prod pod=api-server-12345
 | Command | Description |
 |---------|-------------|
 | `hop <alias>` | Connect to a host |
+| `hop` | Connect to default/only host |
 | `hop --list` | List configured hosts |
 | `hop --check` | Check backend availability |
 | `hop --add <name> <key=value>...` | Add a new host |
+| `hop --remove <name>` | Remove a host |
+| `hop --show <name>` | Show host configuration |
+| `hop --edit` | Open config file in `$EDITOR` |
 | `hop --copy <src> <dst>` | Copy files to/from host |
+| `hop --rsync -- [opts] <src> <dst>` | Sync files using rsync |
 | `hop --forward "<alias> <local>:<remote>"` | Port forwarding |
+| `hop <alias> -e "<command>"` | Execute a command on remote host |
+| `hop --dry-run <alias>` | Show command without executing |
+| `hop --install-key <alias>` | Install SSH public key on host |
+| `hop --terminal <alias>` | Sync terminfo then connect |
 
 ### Examples
 
@@ -156,13 +161,35 @@ hop --add api type=k8s namespace=prod pod=api-server-12345
 hop production          # SSH to production server
 hop mycontainer         # Shell into Docker container
 hop mypod               # Exec into Kubernetes pod
+hop                     # Connect to default/only host
+
+# Prefix syntax
+hop ini:production      # Connect to host from specific source
+hop .production         # Use project config only
+hop ~production         # Use user config only
+
+# Execute remote commands
+hop production -e "whoami"
 
 # Copy files
 hop --copy localfile.txt production:/remote/path    # Upload
 hop --copy production:/remote/file.txt ./local      # Download
 
+# Rsync
+hop --rsync -- -avz src/ production:/path           # Upload with rsync
+hop --rsync -- production:/path/ ./local             # Download with rsync
+
 # Port forwarding
 hop --forward "production 8080:80"    # Forward localhost:8080 to remote:80
+
+# SSH key management
+hop --install-key production                        # Install default key
+hop --install-key production ~/.ssh/id_custom.pub   # Install specific key
+
+# Config management
+hop --show production   # View host config
+hop --edit              # Edit config in $EDITOR
+hop --dry-run production  # Preview command
 
 # Use local config file (./hosts.ini)
 hop --local --list
